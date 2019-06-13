@@ -329,6 +329,8 @@ def vectorize_loops : Flag<["-"], "vectorize-loops">,
   HelpText<"Run the Loop vectorization passes">;
 def vectorize_slp : Flag<["-"], "vectorize-slp">,
   HelpText<"Run the SLP vectorization passes">;
+def custom_loop_optz : Flag<["-"], "custom-loop-optz">,
+  HelpText<"Run custom loop tranformation order pass. Pass added by Aniket Shivam.">;
 def dependent_lib : Joined<["--"], "dependent-lib=">,
   HelpText<"Add dependent library">;
 def linker_option : Joined<["--"], "linker-option=">,

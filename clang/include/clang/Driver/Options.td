@@ -1735,6 +1735,10 @@ def fslp_vectorize : Flag<["-"], "fslp-vectorize">, Group<f_Group>,
 def fno_slp_vectorize : Flag<["-"], "fno-slp-vectorize">, Group<f_Group>;
 def : Flag<["-"], "ftree-slp-vectorize">, Alias<fslp_vectorize>;
 def : Flag<["-"], "fno-tree-slp-vectorize">, Alias<fno_slp_vectorize>;
+def fcustom_loop_optz : Flag<["-"], "fcustom-loop-optz">, Group<f_Group>,
+  HelpText<"Use custom loop tranformation order. Pass added by Aniket Shivam.">;
+def fno_custom_loop_optz : Flag<["-"], "fno-custom-loop-optz">, Group<f_Group>;
+
 def Wlarge_by_value_copy_def : Flag<["-"], "Wlarge-by-value-copy">,
   HelpText<"Warn if a function definition returns or accepts an object larger "
            "in bytes than a given value">, Flags<[HelpHidden]>;

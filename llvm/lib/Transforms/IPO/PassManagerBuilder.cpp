@@ -709,6 +709,10 @@ void PassManagerBuilder::populateModulePassManager(
       MPM.add(createEarlyCSEPass());
     }
   }
+  // Check if custom loop transformation ordering is enabled.
+  if (LoopCustomOptz)
+    DEBUG_WITH_TYPE("LoopCustomOptz", dbgs() << "PassManagerBuilder.populateModulePassManager: "
+                                             << "Enabling custom loop transformation order.\n");
 
   addExtensionsToPM(EP_Peephole, MPM);
   addInstructionCombiningPass(MPM);

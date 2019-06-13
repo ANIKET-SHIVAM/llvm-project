@@ -5036,6 +5036,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                    options::OPT_fno_slp_vectorize, EnableSLPVec))
     CmdArgs.push_back("-vectorize-slp");
 
+  // Run custom order of loop transformations other than the default static order.
+  // Pass added by Aniket Shivam. Experimental Pass.
+  if (Args.hasFlag(options::OPT_fcustom_loop_optz,
+                   options::OPT_fno_custom_loop_optz, false))
+    CmdArgs.push_back("-custom-loop-optz");
+
   ParseMPreferVectorWidth(D, Args, CmdArgs);
 
   if (Arg *A = Args.getLastArg(options::OPT_fshow_overloads_EQ))

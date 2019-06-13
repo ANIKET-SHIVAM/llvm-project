@@ -155,6 +155,7 @@ PassManagerBuilder::PassManagerBuilder() {
     DisableUnrollLoops = false;
     SLPVectorize = RunSLPVectorization;
     LoopVectorize = EnableLoopVectorization;
+    LoopCustomOptz = false;
     LoopsInterleaved = EnableLoopInterleaving;
     RerollLoops = RunLoopRerolling;
     NewGVN = RunNewGVN;
@@ -710,9 +711,9 @@ void PassManagerBuilder::populateModulePassManager(
     }
   }
   // Check if custom loop transformation ordering is enabled.
-  if (LoopCustomOptz)
-    DEBUG_WITH_TYPE("LoopCustomOptz", dbgs() << "PassManagerBuilder.populateModulePassManager: "
-                                             << "Enabling custom loop transformation order.\n");
+  if (LoopCustomOptz) {
+    MPM.add(createLoopCustomOptzPass());
+  }
 
   addExtensionsToPM(EP_Peephole, MPM);
   addInstructionCombiningPass(MPM);

@@ -127,6 +127,7 @@ namespace {
       (void) llvm::createLICMPass();
       (void) llvm::createLoopSinkPass();
       (void) llvm::createLazyValueInfoPass();
+      (void) llvm::createLoopCustomOptzPass();
       (void) llvm::createLoopExtractorPass();
       (void) llvm::createLoopInterchangePass();
       (void) llvm::createLoopPredicationPass();

@@ -170,6 +170,12 @@ ModulePass *createIPSCCPPass();
 ///
 Pass *createLoopExtractorPass();
 
+//===----------------------------------------------------------------------===//
+/// createLoopCustomOptzPass - This pass changes the order of loop transformations.
+/// Added by: Aniket Shivam
+///
+ModulePass *createLoopCustomOptzPass();
+
 /// createSingleLoopExtractorPass - This pass extracts one natural loop from the
 /// program into a function if it can.  This is used by bugpoint.
 ///

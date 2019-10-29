@@ -138,7 +138,9 @@ void Instruction::dropPoisonGeneratingFlags() {
     cast<GetElementPtrInst>(this)->setIsInBounds(false);
     break;
   }
+  // TODO: FastMathFlags!
 }
+
 
 bool Instruction::isExact() const {
   return cast<PossiblyExactOperator>(this)->isExact();
@@ -522,7 +524,7 @@ bool Instruction::mayReadFromMemory() const {
   case Instruction::Call:
   case Instruction::Invoke:
   case Instruction::CallBr:
-    return !cast<CallBase>(this)->doesNotAccessMemory();
+    return !cast<CallBase>(this)->doesNotReadMemory();
   case Instruction::Store:
     return !cast<StoreInst>(this)->isUnordered();
   }

@@ -861,6 +861,48 @@ define void @fastmathflags_vector_select(<2 x i1> %cond, <2 x double> %op1, <2 x
   ret void
 }
 
+define void @fastmathflags_phi(i1 %cond, float %f1, float %f2, double %d1, double %d2, half %h1, half %h2) {
+entry:
+  br i1 %cond, label %L1, label %L2
+L1:
+  br label %exit
+L2:
+  br label %exit
+exit:
+  %p.nnan = phi nnan float [ %f1, %L1 ], [ %f2, %L2 ]
+  ; CHECK: %p.nnan = phi nnan float [ %f1, %L1 ], [ %f2, %L2 ]
+  %p.ninf = phi ninf double [ %d1, %L1 ], [ %d2, %L2 ]
+  ; CHECK: %p.ninf = phi ninf double [ %d1, %L1 ], [ %d2, %L2 ]
+  %p.contract = phi contract half [ %h1, %L1 ], [ %h2, %L2 ]
+  ; CHECK: %p.contract = phi contract half [ %h1, %L1 ], [ %h2, %L2 ]
+  %p.nsz.reassoc = phi reassoc nsz float [ %f1, %L1 ], [ %f2, %L2 ]
+  ; CHECK: %p.nsz.reassoc = phi reassoc nsz float [ %f1, %L1 ], [ %f2, %L2 ]
+  %p.fast = phi fast half [ %h2, %L1 ], [ %h1, %L2 ]
+  ; CHECK: %p.fast = phi fast half [ %h2, %L1 ], [ %h1, %L2 ]
+  ret void
+}
+
+define void @fastmathflags_vector_phi(i1 %cond, <4 x float> %f1, <4 x float> %f2, <2 x double> %d1, <2 x double> %d2, <8 x half> %h1, <8 x half> %h2) {
+entry:
+  br i1 %cond, label %L1, label %L2
+L1:
+  br label %exit
+L2:
+  br label %exit
+exit:
+  %p.nnan = phi nnan <4 x float> [ %f1, %L1 ], [ %f2, %L2 ]
+  ; CHECK: %p.nnan = phi nnan <4 x float> [ %f1, %L1 ], [ %f2, %L2 ]
+  %p.ninf = phi ninf <2 x double> [ %d1, %L1 ], [ %d2, %L2 ]
+  ; CHECK: %p.ninf = phi ninf <2 x double> [ %d1, %L1 ], [ %d2, %L2 ]
+  %p.contract = phi contract <8 x half> [ %h1, %L1 ], [ %h2, %L2 ]
+  ; CHECK: %p.contract = phi contract <8 x half> [ %h1, %L1 ], [ %h2, %L2 ]
+  %p.nsz.reassoc = phi reassoc nsz <4 x float> [ %f1, %L1 ], [ %f2, %L2 ]
+  ; CHECK: %p.nsz.reassoc = phi reassoc nsz <4 x float> [ %f1, %L1 ], [ %f2, %L2 ]
+  %p.fast = phi fast <8 x half> [ %h2, %L1 ], [ %h1, %L2 ]
+  ; CHECK: %p.fast = phi fast <8 x half> [ %h2, %L1 ], [ %h1, %L2 ]
+  ret void
+}
+
 ; Check various fast math flags and floating-point types on calls.
 
 declare float @fmf1()
@@ -917,6 +959,10 @@ define void @typesystem() {
   ; CHECK: %t7 = alloca x86_mmx
   %t8 = alloca %opaquety*
   ; CHECK: %t8 = alloca %opaquety*
+  %t9 = alloca <4 x i32>
+  ; CHECK: %t9 = alloca <4 x i32>
+  %t10 = alloca <vscale x 4 x i32>
+  ; CHECK: %t10 = alloca <vscale x 4 x i32>
 
   ret void
 }
@@ -1347,10 +1393,7 @@ exit:
   ; CHECK: select <2 x i1> <i1 true, i1 false>, <2 x i8> <i8 2, i8 3>, <2 x i8> <i8 3, i8 2>
 
   call void @f.nobuiltin() builtin
-  ; CHECK: call void @f.nobuiltin() #42
-
-  call void @f.strictfp() strictfp
-  ; CHECK: call void @f.strictfp() #43
+  ; CHECK: call void @f.nobuiltin() #44
 
   call fastcc noalias i32* @f.noalias() noinline
   ; CHECK: call fastcc noalias i32* @f.noalias() #12
@@ -1471,7 +1514,7 @@ declare void @llvm.write_register.i32(metadata, i32)
 declare void @llvm.write_register.i64(metadata, i64)
 declare i8* @llvm.stacksave()
 declare void @llvm.stackrestore(i8*)
-declare void @llvm.prefetch(i8*, i32, i32, i32)
+declare void @llvm.prefetch.p0i8(i8*, i32, i32, i32)
 declare void @llvm.pcmarker(i32)
 declare i64 @llvm.readcyclecounter()
 declare void @llvm.clear_cache(i8*, i8*)
@@ -1482,7 +1525,7 @@ define void @intrinsics.codegen() {
   call i8* @llvm.returnaddress(i32 1)
   ; CHECK: call i8* @llvm.returnaddress(i32 1)
   call i8* @llvm.frameaddress(i32 1)
-  ; CHECK: call i8* @llvm.frameaddress(i32 1)
+  ; CHECK: call i8* @llvm.frameaddress.p0i8(i32 1)
 
   call i32 @llvm.read_register.i32(metadata !10)
   ; CHECK: call i32 @llvm.read_register.i32(metadata !10)
@@ -1498,8 +1541,8 @@ define void @intrinsics.codegen() {
   call void @llvm.stackrestore(i8* %stack)
   ; CHECK: call void @llvm.stackrestore(i8* %stack)
 
-  call void @llvm.prefetch(i8* %stack, i32 0, i32 3, i32 0)
-  ; CHECK: call void @llvm.prefetch(i8* %stack, i32 0, i32 3, i32 0)
+  call void @llvm.prefetch.p0i8(i8* %stack, i32 0, i32 3, i32 0)
+  ; CHECK: call void @llvm.prefetch.p0i8(i8* %stack, i32 0, i32 3, i32 0)
 
   call void @llvm.pcmarker(i32 1)
   ; CHECK: call void @llvm.pcmarker(i32 1)
@@ -1715,16 +1758,23 @@ normal:
 
 
 declare void @f.writeonly() writeonly
-; CHECK: declare void @f.writeonly() #40
+; CHECK: declare void @f.writeonly() #41
 
 declare void @f.speculatable() speculatable
-; CHECK: declare void @f.speculatable() #41
+; CHECK: declare void @f.speculatable() #42
 
 ;; Constant Expressions
 
 define i8** @constexpr() {
   ; CHECK: ret i8** getelementptr inbounds ({ [4 x i8*], [4 x i8*] }, { [4 x i8*], [4 x i8*] }* null, i32 0, inrange i32 1, i32 2)
   ret i8** getelementptr inbounds ({ [4 x i8*], [4 x i8*] }, { [4 x i8*], [4 x i8*] }* null, i32 0, inrange i32 1, i32 2)
+}
+
+define void @instructions.strictfp() strictfp {
+  call void @f.strictfp() strictfp
+  ; CHECK: call void @f.strictfp() #43
+
+  ret void
 }
 
 ; immarg attribute
@@ -1775,15 +1825,16 @@ declare void @byval_named_type(%named_type* byval(%named_type))
 ; CHECK: attributes #32 = { norecurse }
 ; CHECK: attributes #33 = { inaccessiblememonly }
 ; CHECK: attributes #34 = { inaccessiblemem_or_argmemonly }
-; CHECK: attributes #35 = { nounwind readnone }
+; CHECK: attributes #35 = { nounwind readnone willreturn }
 ; CHECK: attributes #36 = { argmemonly nounwind readonly }
 ; CHECK: attributes #37 = { argmemonly nounwind }
-; CHECK: attributes #38 = { nounwind readonly }
-; CHECK: attributes #39 = { inaccessiblemem_or_argmemonly nounwind }
-; CHECK: attributes #40 = { writeonly }
-; CHECK: attributes #41 = { speculatable }
-; CHECK: attributes #42 = { builtin }
+; CHECK: attributes #38 = { nounwind readnone }
+; CHECK: attributes #39 = { nounwind readonly }
+; CHECK: attributes #40 = { inaccessiblemem_or_argmemonly nounwind willreturn }
+; CHECK: attributes #41 = { writeonly }
+; CHECK: attributes #42 = { speculatable }
 ; CHECK: attributes #43 = { strictfp }
+; CHECK: attributes #44 = { builtin }
 
 ;; Metadata
 

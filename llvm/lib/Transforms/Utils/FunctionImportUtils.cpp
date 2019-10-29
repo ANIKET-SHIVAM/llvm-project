@@ -210,7 +210,7 @@ void FunctionImportGlobalProcessing::processGlobalForThinLTO(GlobalValue &GV) {
       if (Function *F = dyn_cast<Function>(&GV)) {
         if (!F->isDeclaration()) {
           for (auto &S : VI.getSummaryList()) {
-            FunctionSummary *FS = dyn_cast<FunctionSummary>(S->getBaseObject());
+            auto *FS = cast<FunctionSummary>(S->getBaseObject());
             if (FS->modulePath() == M.getModuleIdentifier()) {
               F->setEntryCount(Function::ProfileCount(FS->entryCount(),
                                                       Function::PCT_Synthetic));
@@ -229,20 +229,27 @@ void FunctionImportGlobalProcessing::processGlobalForThinLTO(GlobalValue &GV) {
     }
   }
 
-  // Mark read-only variables which can be imported with specific attribute.
-  // We can't internalize them now because IRMover will fail to link variable
-  // definitions to their external declarations during ThinLTO import. We'll
-  // internalize read-only variables later, after import is finished.
-  // See internalizeImmutableGVs.
+  // Mark read/write-only variables which can be imported with specific
+  // attribute. We can't internalize them now because IRMover will fail
+  // to link variable definitions to their external declarations during
+  // ThinLTO import. We'll internalize read-only variables later, after
+  // import is finished. See internalizeGVsAfterImport.
   //
   // If global value dead stripping is not enabled in summary then
   // propagateConstants hasn't been run. We can't internalize GV
   // in such case.
   if (!GV.isDeclaration() && VI && ImportIndex.withGlobalValueDeadStripping()) {
-    const auto &SL = VI.getSummaryList();
-    auto *GVS = SL.empty() ? nullptr : dyn_cast<GlobalVarSummary>(SL[0].get());
-    if (GVS && GVS->isReadOnly())
-      cast<GlobalVariable>(&GV)->addAttribute("thinlto-internalize");
+    if (GlobalVariable *V = dyn_cast<GlobalVariable>(&GV)) {
+      // We can have more than one local with the same GUID, in the case of
+      // same-named locals in different but same-named source files that were
+      // compiled in their respective directories (so the source file name
+      // and resulting GUID is the same). Find the one in this module.
+      auto* GVS = dyn_cast<GlobalVarSummary>(
+          ImportIndex.findSummaryInModule(VI, M.getModuleIdentifier()));
+      // At this stage "maybe" is "definitely"
+      if (GVS && (GVS->maybeReadOnly() || GVS->maybeWriteOnly()))
+        V->addAttribute("thinlto-internalize");
+    }
   }
 
   bool DoPromote = false;

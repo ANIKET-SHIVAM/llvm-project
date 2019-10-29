@@ -19,7 +19,7 @@ let TargetPrefix = "arm" in {  // All intrinsics start with "llvm.arm.".
 // A space-consuming intrinsic primarily for testing ARMConstantIslands. The
 // first argument is the number of bytes this "instruction" takes up, the second
 // and return value are essentially chains, used to force ordering during ISel.
-def int_arm_space : Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty], []>;
+def int_arm_space : Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty], [ImmArg<0>]>;
 
 // 16-bit multiplications
 def int_arm_smulbb : GCCBuiltin<"__builtin_arm_smulbb">,
@@ -777,5 +777,73 @@ class Neon_Dot_Intrinsic
 def int_arm_neon_udot : Neon_Dot_Intrinsic;
 def int_arm_neon_sdot : Neon_Dot_Intrinsic;
 
+def int_arm_vctp8  : Intrinsic<[llvm_v16i1_ty], [llvm_i32_ty], [IntrNoMem]>;
+def int_arm_vctp16 : Intrinsic<[llvm_v8i1_ty], [llvm_i32_ty], [IntrNoMem]>;
+def int_arm_vctp32 : Intrinsic<[llvm_v4i1_ty], [llvm_i32_ty], [IntrNoMem]>;
+def int_arm_vctp64 : Intrinsic<[llvm_v2i1_ty], [llvm_i32_ty], [IntrNoMem]>;
+
+// GNU eabi mcount
+def int_arm_gnu_eabi_mcount : Intrinsic<[],
+                                    [],
+                                    [IntrReadMem, IntrWriteMem]>;
+
+def int_arm_mve_pred_i2v : Intrinsic<
+  [llvm_anyvector_ty], [llvm_i32_ty], [IntrNoMem]>;
+def int_arm_mve_pred_v2i : Intrinsic<
+  [llvm_i32_ty], [llvm_anyvector_ty], [IntrNoMem]>;
+
+multiclass IntrinsicSignSuffix<list<LLVMType> rets, list<LLVMType> params = [],
+                                    list<IntrinsicProperty> props = [],
+                                    string name = "",
+                                    list<SDNodeProperty> sdprops = []> {
+  def _s: Intrinsic<rets, params, props, name, sdprops>;
+  def _u: Intrinsic<rets, params, props, name, sdprops>;
+}
+
+def int_arm_mve_add_predicated: Intrinsic<[llvm_anyvector_ty],
+   [LLVMMatchType<0>, LLVMMatchType<0>, llvm_anyvector_ty, LLVMMatchType<0>],
+   [IntrNoMem]>;
+def int_arm_mve_sub_predicated: Intrinsic<[llvm_anyvector_ty],
+   [LLVMMatchType<0>, LLVMMatchType<0>, llvm_anyvector_ty, LLVMMatchType<0>],
+   [IntrNoMem]>;
+
+defm int_arm_mve_minv: IntrinsicSignSuffix<[llvm_i32_ty],
+   [llvm_i32_ty, llvm_anyvector_ty], [IntrNoMem]>;
+defm int_arm_mve_maxv: IntrinsicSignSuffix<[llvm_i32_ty],
+   [llvm_i32_ty, llvm_anyvector_ty], [IntrNoMem]>;
+
+def int_arm_mve_vcvt_narrow: Intrinsic<[llvm_v8f16_ty],
+   [llvm_v8f16_ty, llvm_v4f32_ty, llvm_i32_ty], [IntrNoMem]>;
+def int_arm_mve_vcvt_narrow_predicated: Intrinsic<[llvm_v8f16_ty],
+   [llvm_v8f16_ty, llvm_v4f32_ty, llvm_i32_ty, llvm_v4i1_ty], [IntrNoMem]>;
+
+def int_arm_mve_vldr_gather_base_wb: Intrinsic<
+   [llvm_anyvector_ty, llvm_anyvector_ty],
+   [LLVMMatchType<1>, llvm_i32_ty], [IntrReadMem]>;
+def int_arm_mve_vldr_gather_base_wb_predicated: Intrinsic<
+   [llvm_anyvector_ty, llvm_anyvector_ty],
+   [LLVMMatchType<1>, llvm_i32_ty, llvm_anyvector_ty], [IntrReadMem]>;
+
+def int_arm_mve_urshrl: Intrinsic<
+   [llvm_i32_ty, llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
+   [IntrNoMem]>;
+
+def int_arm_mve_vadc: Intrinsic<
+   [llvm_anyvector_ty, llvm_i32_ty],
+   [LLVMMatchType<0>, LLVMMatchType<0>, llvm_i32_ty], [IntrNoMem]>;
+def int_arm_mve_vadc_predicated: Intrinsic<
+   [llvm_anyvector_ty, llvm_i32_ty],
+   [LLVMMatchType<0>, LLVMMatchType<0>, LLVMMatchType<0>,
+    llvm_i32_ty, llvm_anyvector_ty], [IntrNoMem]>;
+
+def int_arm_mve_vld2q: Intrinsic<[llvm_anyvector_ty, LLVMMatchType<0>], [llvm_anyptr_ty], [IntrReadMem]>;
+def int_arm_mve_vld4q: Intrinsic<[llvm_anyvector_ty, LLVMMatchType<0>, LLVMMatchType<0>, LLVMMatchType<0>], [llvm_anyptr_ty], [IntrReadMem]>;
+
+def int_arm_mve_vst2q: Intrinsic<[], [llvm_anyptr_ty, llvm_anyvector_ty, LLVMMatchType<1>, llvm_i32_ty], [IntrWriteMem]>;
+def int_arm_mve_vst4q: Intrinsic<[], [llvm_anyptr_ty, llvm_anyvector_ty, LLVMMatchType<1>, LLVMMatchType<1>, LLVMMatchType<1>, llvm_i32_ty], [IntrWriteMem]
+>;
+
+def int_arm_cls: Intrinsic<[llvm_i32_ty], [llvm_i32_ty], [IntrNoMem]>;
+def int_arm_cls64: Intrinsic<[llvm_i32_ty], [llvm_i64_ty], [IntrNoMem]>;
 
 } // end TargetPrefix

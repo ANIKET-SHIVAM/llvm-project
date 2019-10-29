@@ -20,9 +20,9 @@ set( LLVM_LINK_COMPONENTS
 option(CLANG_PLUGIN_SUPPORT "Build clang with plugin support" ON)
 
 # Support plugins. This must be before add_clang_executable as it reads
-# LLVM_NO_DEAD_STRIP.
+# LLVM_SUPPORT_PLUGINS.
 if(CLANG_PLUGIN_SUPPORT)
-  set(LLVM_NO_DEAD_STRIP 1)
+  set(LLVM_SUPPORT_PLUGINS 1)
 endif()
 
 if(NOT CLANG_BUILT_STANDALONE)
@@ -39,7 +39,7 @@ add_clang_tool(clang
   ${tablegen_deps}
   )
 
-target_link_libraries(clang
+clang_target_link_libraries(clang
   PRIVATE
   clangBasic
   clangCodeGen

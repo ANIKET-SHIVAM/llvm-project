@@ -211,6 +211,7 @@ protected:
   MCSection *XDataSection;
   MCSection *SXDataSection;
   MCSection *GFIDsSection;
+  MCSection *GLJMPSection;
 
 public:
   void InitMCObjectFileInfo(const Triple &TT, bool PIC, MCContext &ctx,
@@ -379,6 +380,7 @@ public:
   MCSection *getXDataSection() const { return XDataSection; }
   MCSection *getSXDataSection() const { return SXDataSection; }
   MCSection *getGFIDsSection() const { return GFIDsSection; }
+  MCSection *getGLJMPSection() const { return GLJMPSection; }
 
   MCSection *getEHFrameSection() {
     return EHFrameSection;
@@ -400,6 +402,7 @@ private:
   void initELFMCObjectFileInfo(const Triple &T, bool Large);
   void initCOFFMCObjectFileInfo(const Triple &T);
   void initWasmMCObjectFileInfo(const Triple &T);
+  void initXCOFFMCObjectFileInfo(const Triple &T);
   MCSection *getDwarfComdatSection(const char *Name, uint64_t Hash) const;
 
 public:

@@ -62,7 +62,8 @@ extern "C" void init_lldb(void) {}
 extern "C" bool LLDBSwigPythonBreakpointCallbackFunction(
     const char *python_function_name, const char *session_dictionary_name,
     const lldb::StackFrameSP &sb_frame,
-    const lldb::BreakpointLocationSP &sb_bp_loc) {
+    const lldb::BreakpointLocationSP &sb_bp_loc,
+    StructuredDataImpl *args_impl) {
   return false;
 }
 
@@ -95,6 +96,8 @@ LLDBSwigPythonCreateCommandObject(const char *python_class_name,
 
 extern "C" void *LLDBSwigPythonCreateScriptedThreadPlan(
     const char *python_class_name, const char *session_dictionary_name,
+    StructuredDataImpl *args_data,
+    std::string &error_string,
     const lldb::ThreadPlanSP &thread_plan_sp) {
   return nullptr;
 }

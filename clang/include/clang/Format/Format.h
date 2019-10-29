@@ -79,6 +79,19 @@ struct FormatStyle {
   /// brackets.
   BracketAlignmentStyle AlignAfterOpenBracket;
 
+  /// \brief If ``true``, aligns consecutive C/C++ preprocessor macros.
+  ///
+  /// This will align C/C++ preprocessor macros of consecutive lines.
+  /// Will result in formattings like
+  /// \code
+  ///   #define SHORT_NAME       42
+  ///   #define LONGER_NAME      0x007f
+  ///   #define EVEN_LONGER_NAME (2)
+  ///   #define foo(x)           (x * x)
+  ///   #define bar(y, z)        (y + z)
+  /// \endcode
+  bool AlignConsecutiveMacros;
+
   /// If ``true``, aligns consecutive assignments.
   ///
   /// This will align the assignment operators of consecutive lines. This
@@ -203,10 +216,37 @@ struct FormatStyle {
   /// \endcode
   bool AllowAllParametersOfDeclarationOnNextLine;
 
-  /// Allows contracting simple braced statements to a single line.
-  ///
-  /// E.g., this allows ``if (a) { return; }`` to be put on a single line.
-  bool AllowShortBlocksOnASingleLine;
+  /// Different styles for merging short blocks containing at most one
+  /// statement.
+  enum ShortBlockStyle {
+    /// Never merge blocks into a single line.
+    /// \code
+    ///   while (true) {
+    ///   }
+    ///   while (true) {
+    ///     continue;
+    ///   }
+    /// \endcode
+    SBS_Never,
+    /// Only merge empty blocks.
+    /// \code
+    ///   while (true) {}
+    ///   while (true) {
+    ///     continue;
+    ///   }
+    /// \endcode
+    SBS_Empty,
+    /// Always merge short blocks into a single line.
+    /// \code
+    ///   while (true) {}
+    ///   while (true) { continue; }
+    /// \endcode
+    SBS_Always,
+  };
+
+  /// Dependent on the value, ``while (true) { continue; }`` can be put on a
+  /// single line.
+  ShortBlockStyle AllowShortBlocksOnASingleLine;
 
   /// If ``true``, short case labels will be contracted to a single line.
   /// \code
@@ -449,38 +489,38 @@ struct FormatStyle {
 
   /// Different ways to break after the template declaration.
   enum BreakTemplateDeclarationsStyle {
-      /// Do not force break before declaration.
-      /// ``PenaltyBreakTemplateDeclaration`` is taken into account.
-      /// \code
-      ///    template <typename T> T foo() {
-      ///    }
-      ///    template <typename T> T foo(int aaaaaaaaaaaaaaaaaaaaa,
-      ///                                int bbbbbbbbbbbbbbbbbbbbb) {
-      ///    }
-      /// \endcode
-      BTDS_No,
-      /// Force break after template declaration only when the following
-      /// declaration spans multiple lines.
-      /// \code
-      ///    template <typename T> T foo() {
-      ///    }
-      ///    template <typename T>
-      ///    T foo(int aaaaaaaaaaaaaaaaaaaaa,
-      ///          int bbbbbbbbbbbbbbbbbbbbb) {
-      ///    }
-      /// \endcode
-      BTDS_MultiLine,
-      /// Always break after template declaration.
-      /// \code
-      ///    template <typename T>
-      ///    T foo() {
-      ///    }
-      ///    template <typename T>
-      ///    T foo(int aaaaaaaaaaaaaaaaaaaaa,
-      ///          int bbbbbbbbbbbbbbbbbbbbb) {
-      ///    }
-      /// \endcode
-      BTDS_Yes
+    /// Do not force break before declaration.
+    /// ``PenaltyBreakTemplateDeclaration`` is taken into account.
+    /// \code
+    ///    template <typename T> T foo() {
+    ///    }
+    ///    template <typename T> T foo(int aaaaaaaaaaaaaaaaaaaaa,
+    ///                                int bbbbbbbbbbbbbbbbbbbbb) {
+    ///    }
+    /// \endcode
+    BTDS_No,
+    /// Force break after template declaration only when the following
+    /// declaration spans multiple lines.
+    /// \code
+    ///    template <typename T> T foo() {
+    ///    }
+    ///    template <typename T>
+    ///    T foo(int aaaaaaaaaaaaaaaaaaaaa,
+    ///          int bbbbbbbbbbbbbbbbbbbbb) {
+    ///    }
+    /// \endcode
+    BTDS_MultiLine,
+    /// Always break after template declaration.
+    /// \code
+    ///    template <typename T>
+    ///    T foo() {
+    ///    }
+    ///    template <typename T>
+    ///    T foo(int aaaaaaaaaaaaaaaaaaaaa,
+    ///          int bbbbbbbbbbbbbbbbbbbbb) {
+    ///    }
+    /// \endcode
+    BTDS_Yes
   };
 
   /// The template declaration breaking style to use.
@@ -666,6 +706,32 @@ struct FormatStyle {
     ///   };
     /// \endcode
     BS_Allman,
+    /// Like ``Allman`` but always indent braces and line up code with braces.
+    /// \code
+    ///    try
+    ///     {
+    ///     foo();
+    ///     }
+    ///   catch ()
+    ///     {
+    ///     }
+    ///   void foo() { bar(); }
+    ///   class foo
+    ///     {
+    ///     };
+    ///   if (foo())
+    ///     {
+    ///     }
+    ///   else
+    ///     {
+    ///     }
+    ///   enum X : int
+    ///     {
+    ///     A,
+    ///     B
+    ///     };
+    /// \endcode
+    BS_Whitesmiths,
     /// Always break before braces and add an extra level of indentation to
     /// braces of control statements, not to those of class, function
     /// or other definitions.
@@ -716,6 +782,40 @@ struct FormatStyle {
   /// The brace breaking style to use.
   BraceBreakingStyle BreakBeforeBraces;
 
+  /// Different ways to wrap braces after control statements.
+  enum BraceWrappingAfterControlStatementStyle {
+    /// Never wrap braces after a control statement.
+    /// \code
+    ///   if (foo()) {
+    ///   } else {
+    ///   }
+    ///   for (int i = 0; i < 10; ++i) {
+    ///   }
+    /// \endcode
+    BWACS_Never,
+    /// Only wrap braces after a multi-line control statement.
+    /// \code
+    ///   if (foo && bar &&
+    ///       baz)
+    ///   {
+    ///     quux();
+    ///   }
+    ///   while (foo || bar) {
+    ///   }
+    /// \endcode
+    BWACS_MultiLine,
+    /// Always wrap braces after a control statement.
+    /// \code
+    ///   if (foo())
+    ///   {
+    ///   } else
+    ///   {}
+    ///   for (int i = 0; i < 10; ++i)
+    ///   {}
+    /// \endcode
+    BWACS_Always
+  };
+
   /// Precise control over the wrapping of braces.
   /// \code
   ///   # Should be declared this way:
@@ -751,23 +851,7 @@ struct FormatStyle {
     /// \endcode
     bool AfterClass;
     /// Wrap control statements (``if``/``for``/``while``/``switch``/..).
-    /// \code
-    ///   true:
-    ///   if (foo())
-    ///   {
-    ///   } else
-    ///   {}
-    ///   for (int i = 0; i < 10; ++i)
-    ///   {}
-    ///
-    ///   false:
-    ///   if (foo()) {
-    ///   } else {
-    ///   }
-    ///   for (int i = 0; i < 10; ++i) {
-    ///   }
-    /// \endcode
-    bool AfterControlStatement;
+    BraceWrappingAfterControlStatementStyle AfterControlStatement;
     /// Wrap enum definitions.
     /// \code
     ///   true:
@@ -993,6 +1077,16 @@ struct FormatStyle {
   bool BreakAfterJavaFieldAnnotations;
 
   /// Allow breaking string literals when formatting.
+  /// \code
+  ///    true:
+  ///    const char* x = "veryVeryVeryVeryVeryVe"
+  ///                    "ryVeryVeryVeryVeryVery"
+  ///                    "VeryLongString";
+  ///
+  ///    false:
+  ///    const char* x =
+  ///      "veryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryLongString";
+  /// \endcode
   bool BreakStringLiterals;
 
   /// The column limit.
@@ -1224,6 +1318,22 @@ struct FormatStyle {
   ///    }                                      }
   /// \endcode
   bool IndentCaseLabels;
+
+  /// Indent goto labels.
+  ///
+  /// When ``false``, goto labels are flushed left.
+  /// \code
+  ///    true:                                  false:
+  ///    int f() {                      vs.     int f() {
+  ///      if (foo()) {                           if (foo()) {
+  ///      label1:                              label1:
+  ///        bar();                                 bar();
+  ///      }                                      }
+  ///    label2:                                label2:
+  ///      return 1;                              return 1;
+  ///    }                                      }
+  /// \endcode
+  bool IndentGotoLabels;
 
   /// Options for indenting preprocessor directives.
   enum PPDirectiveIndentStyle {
@@ -1698,8 +1808,8 @@ struct FormatStyle {
   /// If ``false``, spaces will be removed before assignment operators.
   /// \code
   ///    true:                                  false:
-  ///    int a = 5;                     vs.     int a=5;
-  ///    a += 42                                a+=42;
+  ///    int a = 5;                     vs.     int a= 5;
+  ///    a += 42;                               a+= 42;
   /// \endcode
   bool SpaceBeforeAssignmentOperators;
 
@@ -1786,6 +1896,14 @@ struct FormatStyle {
   /// \endcode
   bool SpaceBeforeRangeBasedForLoopColon;
 
+  /// If ``true``, spaces will be inserted into ``{}``.
+  /// \code
+  ///    true:                                false:
+  ///    void f() { }                   vs.   void f() {}
+  ///    while (true) { }                     while (true) {}
+  /// \endcode
+  bool SpaceInEmptyBlock;
+
   /// If ``true``, spaces may be inserted into ``()``.
   /// \code
   ///    true:                                false:
@@ -1855,15 +1973,31 @@ struct FormatStyle {
   /// \endcode
   bool SpacesInSquareBrackets;
 
-  /// Supported language standards.
+  /// Supported language standards for parsing and formatting C++ constructs.
+  /// \code
+  ///    Latest:                                vector<set<int>>
+  ///    c++03                          vs.     vector<set<int> >
+  /// \endcode
+  ///
+  /// The correct way to spell a specific language version is e.g. ``c++11``.
+  /// The historical aliases ``Cpp03`` and ``Cpp11`` are deprecated.
   enum LanguageStandard {
-    /// Use C++03-compatible syntax.
+    /// c++03: Parse and format as C++03.
     LS_Cpp03,
-    /// Use features of C++11, C++14 and C++1z (e.g. ``A<A<int>>`` instead of
-    /// ``A<A<int> >``).
+    /// c++11: Parse and format as C++11.
     LS_Cpp11,
-    /// Automatic detection based on the input.
-    LS_Auto
+    /// c++14: Parse and format as C++14.
+    LS_Cpp14,
+    /// c++17: Parse and format as C++17.
+    LS_Cpp17,
+    /// c++20: Parse and format as C++20.
+    LS_Cpp20,
+    /// Latest: Parse and format using the latest supported language version.
+    /// 'Cpp11' is an alias for LS_Latest for historical reasons.
+    LS_Latest,
+    /// Auto: Automatic detection based on the input.
+    /// Parse using the latest language version. Format based on detected input.
+    LS_Auto,
   };
 
   /// Format compatible with this standard, e.g. use ``A<A<int> >``
@@ -1942,6 +2076,7 @@ struct FormatStyle {
            IncludeStyle.IncludeBlocks == R.IncludeStyle.IncludeBlocks &&
            IncludeStyle.IncludeCategories == R.IncludeStyle.IncludeCategories &&
            IndentCaseLabels == R.IndentCaseLabels &&
+           IndentGotoLabels == R.IndentGotoLabels &&
            IndentPPDirectives == R.IndentPPDirectives &&
            IndentWidth == R.IndentWidth && Language == R.Language &&
            IndentWrappedFunctionNames == R.IndentWrappedFunctionNames &&
@@ -1982,6 +2117,7 @@ struct FormatStyle {
            SpaceBeforeParens == R.SpaceBeforeParens &&
            SpaceBeforeRangeBasedForLoopColon ==
                R.SpaceBeforeRangeBasedForLoopColon &&
+           SpaceInEmptyBlock == R.SpaceInEmptyBlock &&
            SpaceInEmptyParentheses == R.SpaceInEmptyParentheses &&
            SpacesBeforeTrailingComments == R.SpacesBeforeTrailingComments &&
            SpacesInAngles == R.SpacesInAngles &&
@@ -2058,6 +2194,10 @@ FormatStyle getWebKitStyle();
 /// Returns a format style complying with GNU Coding Standards:
 /// http://www.gnu.org/prep/standards/standards.html
 FormatStyle getGNUStyle();
+
+/// Returns a format style complying with Microsoft style guide:
+/// https://docs.microsoft.com/en-us/visualstudio/ide/editorconfig-code-style-settings-reference?view=vs-2017
+FormatStyle getMicrosoftStyle(FormatStyle::LanguageKind Language);
 
 /// Returns style indicating formatting should be not applied at all.
 FormatStyle getNoStyle();

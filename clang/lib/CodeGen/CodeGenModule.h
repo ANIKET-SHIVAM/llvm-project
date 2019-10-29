@@ -362,6 +362,10 @@ private:
   llvm::SmallVector<std::pair<llvm::GlobalValue *, llvm::Constant *>, 8>
     GlobalValReplacements;
 
+  /// Variables for which we've emitted globals containing their constant
+  /// values along with the corresponding globals, for opportunistic reuse.
+  llvm::DenseMap<const VarDecl*, llvm::GlobalVariable*> InitializerConstants;
+
   /// Set of global decls for which we already diagnosed mangled name conflict.
   /// Required to not issue a warning (on a mangling conflict) multiple times
   /// for the same decl.
@@ -622,6 +626,9 @@ public:
                                       llvm::GlobalVariable *C) {
     StaticLocalDeclGuardMap[D] = C;
   }
+
+  Address createUnnamedGlobalFrom(const VarDecl &D, llvm::Constant *Constant,
+                                  CharUnits Align);
 
   bool lookupRepresentativeDecl(StringRef MangledName,
                                 GlobalDecl &Result) const;
@@ -1020,11 +1027,22 @@ public:
   }
 
   /// Create or return a runtime function declaration with the specified type
-  /// and name.
+  /// and name. If \p AssumeConvergent is true, the call will have the
+  /// convergent attribute added.
   llvm::FunctionCallee
   CreateRuntimeFunction(llvm::FunctionType *Ty, StringRef Name,
                         llvm::AttributeList ExtraAttrs = llvm::AttributeList(),
-                        bool Local = false);
+                        bool Local = false, bool AssumeConvergent = false);
+
+  /// Create or return a runtime function declaration with the specified type
+  /// and name. This will automatically add the convergent attribute to the
+  /// function declaration.
+  llvm::FunctionCallee CreateConvergentRuntimeFunction(
+      llvm::FunctionType *Ty, StringRef Name,
+      llvm::AttributeList ExtraAttrs = llvm::AttributeList(),
+      bool Local = false) {
+    return CreateRuntimeFunction(Ty, Name, ExtraAttrs, Local, true);
+  }
 
   /// Create a new runtime global variable with the specified type and name.
   llvm::Constant *CreateRuntimeVariable(llvm::Type *Ty,
@@ -1263,13 +1281,26 @@ public:
   /// \param D Requires declaration
   void EmitOMPRequiresDecl(const OMPRequiresDecl *D);
 
+  /// Emits the definition of \p OldGD function with body from \p NewGD.
+  /// Required for proper handling of declare variant directive on the GPU.
+  void emitOpenMPDeviceFunctionRedefinition(GlobalDecl OldGD, GlobalDecl NewGD,
+                                            llvm::GlobalValue *GV);
+
   /// Returns whether the given record has hidden LTO visibility and therefore
   /// may participate in (single-module) CFI and whole-program vtable
   /// optimization.
   bool HasHiddenLTOVisibility(const CXXRecordDecl *RD);
 
+  /// Returns the vcall visibility of the given type. This is the scope in which
+  /// a virtual function call could be made which ends up being dispatched to a
+  /// member function of this class. This scope can be wider than the visibility
+  /// of the class itself when the class has a more-visible dynamic base class.
+  llvm::GlobalObject::VCallVisibility
+  GetVCallVisibilityLevel(const CXXRecordDecl *RD);
+
   /// Emit type metadata for the given vtable using the given layout.
-  void EmitVTableTypeMetadata(llvm::GlobalVariable *VTable,
+  void EmitVTableTypeMetadata(const CXXRecordDecl *RD,
+                              llvm::GlobalVariable *VTable,
                               const VTableLayout &VTLayout);
 
   /// Generate a cross-DSO type identifier for MD.

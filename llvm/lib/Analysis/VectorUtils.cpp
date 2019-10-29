@@ -37,8 +37,9 @@ static cl::opt<unsigned> MaxInterleaveGroupFactor(
     cl::init(8));
 
 /// Return true if all of the intrinsic's arguments and return type are scalars
-/// for the scalar form of the intrinsic and vectors for the vector form of the
-/// intrinsic.
+/// for the scalar form of the intrinsic, and vectors for the vector form of the
+/// intrinsic (except operands that are marked as always being scalar by
+/// hasVectorInstrinsicScalarOpd).
 bool llvm::isTriviallyVectorizable(Intrinsic::ID ID) {
   switch (ID) {
   case Intrinsic::bswap: // Begin integer bit-manipulation.
@@ -53,7 +54,9 @@ bool llvm::isTriviallyVectorizable(Intrinsic::ID ID) {
   case Intrinsic::uadd_sat:
   case Intrinsic::usub_sat:
   case Intrinsic::smul_fix:
+  case Intrinsic::smul_fix_sat:
   case Intrinsic::umul_fix:
+  case Intrinsic::umul_fix_sat:
   case Intrinsic::sqrt: // Begin floating-point.
   case Intrinsic::sin:
   case Intrinsic::cos:
@@ -85,8 +88,7 @@ bool llvm::isTriviallyVectorizable(Intrinsic::ID ID) {
   }
 }
 
-/// Identifies if the intrinsic has a scalar operand. It check for
-/// ctlz,cttz and powi special intrinsics whose argument is scalar.
+/// Identifies if the vector form of the intrinsic has a scalar operand.
 bool llvm::hasVectorInstrinsicScalarOpd(Intrinsic::ID ID,
                                         unsigned ScalarOpdIdx) {
   switch (ID) {
@@ -95,7 +97,9 @@ bool llvm::hasVectorInstrinsicScalarOpd(Intrinsic::ID ID,
   case Intrinsic::powi:
     return (ScalarOpdIdx == 1);
   case Intrinsic::smul_fix:
+  case Intrinsic::smul_fix_sat:
   case Intrinsic::umul_fix:
+  case Intrinsic::umul_fix_sat:
     return (ScalarOpdIdx == 2);
   default:
     return false;
@@ -828,15 +832,15 @@ void InterleavedAccessInfo::collectConstStrideAccesses(
                                     /*Assume=*/true, /*ShouldCheckWrap=*/false);
 
       const SCEV *Scev = replaceSymbolicStrideSCEV(PSE, Strides, Ptr);
-      PointerType *PtrTy = dyn_cast<PointerType>(Ptr->getType());
+      PointerType *PtrTy = cast<PointerType>(Ptr->getType());
       uint64_t Size = DL.getTypeAllocSize(PtrTy->getElementType());
 
       // An alignment of 0 means target ABI alignment.
-      unsigned Align = getLoadStoreAlignment(&I);
-      if (!Align)
-        Align = DL.getABITypeAlignment(PtrTy->getElementType());
+      MaybeAlign Alignment = MaybeAlign(getLoadStoreAlignment(&I));
+      if (!Alignment)
+        Alignment = Align(DL.getABITypeAlignment(PtrTy->getElementType()));
 
-      AccessStrideInfo[&I] = StrideDescriptor(Stride, Scev, Size, Align);
+      AccessStrideInfo[&I] = StrideDescriptor(Stride, Scev, Size, *Alignment);
     }
 }
 
@@ -923,7 +927,7 @@ void InterleavedAccessInfo::analyzeInterleaving(
       if (!Group) {
         LLVM_DEBUG(dbgs() << "LV: Creating an interleave group with:" << *B
                           << '\n');
-        Group = createInterleaveGroup(B, DesB.Stride, DesB.Align);
+        Group = createInterleaveGroup(B, DesB.Stride, DesB.Alignment);
       }
       if (B->mayWriteToMemory())
         StoreGroups.insert(Group);
@@ -962,6 +966,10 @@ void InterleavedAccessInfo::analyzeInterleaving(
         // instructions that precede it.
         if (isInterleaved(A)) {
           InterleaveGroup<Instruction> *StoreGroup = getInterleaveGroup(A);
+
+          LLVM_DEBUG(dbgs() << "LV: Invalidated store group due to "
+                               "dependence between " << *A << " and "<< *B << '\n');
+
           StoreGroups.remove(StoreGroup);
           releaseGroup(StoreGroup);
         }
@@ -1026,7 +1034,7 @@ void InterleavedAccessInfo::analyzeInterleaving(
           Group->getIndex(B) + DistanceToB / static_cast<int64_t>(DesB.Size);
 
       // Try to insert A into B's group.
-      if (Group->insertMember(A, IndexA, DesA.Align)) {
+      if (Group->insertMember(A, IndexA, DesA.Alignment)) {
         LLVM_DEBUG(dbgs() << "LV: Inserted:" << *A << '\n'
                           << "    into the interleave group with" << *B
                           << '\n');

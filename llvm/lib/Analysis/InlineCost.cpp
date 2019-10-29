@@ -436,7 +436,8 @@ bool CallAnalyzer::visitAlloca(AllocaInst &I) {
     if (auto *AllocSize = dyn_cast_or_null<ConstantInt>(Size)) {
       Type *Ty = I.getAllocatedType();
       AllocatedSize = SaturatingMultiplyAdd(
-          AllocSize->getLimitedValue(), DL.getTypeAllocSize(Ty), AllocatedSize);
+          AllocSize->getLimitedValue(), DL.getTypeAllocSize(Ty).getFixedSize(),
+          AllocatedSize);
       return Base::visitAlloca(I);
     }
   }
@@ -444,7 +445,8 @@ bool CallAnalyzer::visitAlloca(AllocaInst &I) {
   // Accumulate the allocated size.
   if (I.isStaticAlloca()) {
     Type *Ty = I.getAllocatedType();
-    AllocatedSize = SaturatingAdd(DL.getTypeAllocSize(Ty), AllocatedSize);
+    AllocatedSize = SaturatingAdd(DL.getTypeAllocSize(Ty).getFixedSize(),
+                                  AllocatedSize);
   }
 
   // We will happily inline static alloca instructions.
@@ -880,15 +882,6 @@ void CallAnalyzer::updateThreshold(CallBase &Call, Function &Callee) {
   // basic block at the given callsite context. This is speculatively applied
   // and withdrawn if more than one basic block is seen.
   //
-  // Vector bonuses: We want to more aggressively inline vector-dense kernels
-  // and apply this bonus based on the percentage of vector instructions. A
-  // bonus is applied if the vector instructions exceed 50% and half that amount
-  // is applied if it exceeds 10%. Note that these bonuses are some what
-  // arbitrary and evolved over time by accident as much as because they are
-  // principled bonuses.
-  // FIXME: It would be nice to base the bonus values on something more
-  // scientific.
-  //
   // LstCallToStaticBonus: This large bonus is applied to ensure the inlining
   // of the last call to a static function as inlining such functions is
   // guaranteed to reduce code size.
@@ -896,7 +889,7 @@ void CallAnalyzer::updateThreshold(CallBase &Call, Function &Callee) {
   // These bonus percentages may be set to 0 based on properties of the caller
   // and the callsite.
   int SingleBBBonusPercent = 50;
-  int VectorBonusPercent = 150;
+  int VectorBonusPercent = TTI.getInlinerVectorBonusPercent();
   int LastCallToStaticBonus = InlineConstants::LastCallToStaticBonus;
 
   // Lambda to set all the above bonus and bonus percentages to 0.
@@ -1079,8 +1072,8 @@ bool CallAnalyzer::visitBinaryOperator(BinaryOperator &I) {
 
   Value *SimpleV = nullptr;
   if (auto FI = dyn_cast<FPMathOperator>(&I))
-    SimpleV = SimplifyFPBinOp(I.getOpcode(), CLHS ? CLHS : LHS,
-                              CRHS ? CRHS : RHS, FI->getFastMathFlags(), DL);
+    SimpleV = SimplifyBinOp(I.getOpcode(), CLHS ? CLHS : LHS,
+                            CRHS ? CRHS : RHS, FI->getFastMathFlags(), DL);
   else
     SimpleV =
         SimplifyBinOp(I.getOpcode(), CLHS ? CLHS : LHS, CRHS ? CRHS : RHS, DL);
@@ -1461,19 +1454,6 @@ bool CallAnalyzer::visitSwitchInst(SwitchInst &SI) {
 
   // Maximum valid cost increased in this function.
   int CostUpperBound = INT_MAX - InlineConstants::InstrCost - 1;
-
-  // Exit early for a large switch, assuming one case needs at least one
-  // instruction.
-  // FIXME: This is not true for a bit test, but ignore such case for now to
-  // save compile-time.
-  int64_t CostLowerBound =
-      std::min((int64_t)CostUpperBound,
-               (int64_t)SI.getNumCases() * InlineConstants::InstrCost + Cost);
-
-  if (CostLowerBound > Threshold && !ComputeFullInlineCost) {
-    addCost((int64_t)SI.getNumCases() * InlineConstants::InstrCost);
-    return false;
-  }
 
   unsigned JumpTableSize = 0;
   unsigned NumCaseCluster =

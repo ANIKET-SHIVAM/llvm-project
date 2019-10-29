@@ -1185,6 +1185,9 @@ static OverloadCompare compareOverloads(const CXXMethodDecl &Candidate,
                                         const CXXMethodDecl &Incumbent,
                                         const Qualifiers &ObjectQuals,
                                         ExprValueKind ObjectKind) {
+  // Base/derived shadowing is handled elsewhere.
+  if (Candidate.getDeclContext() != Incumbent.getDeclContext())
+    return OverloadCompare::BothViable;
   if (Candidate.isVariadic() != Incumbent.isVariadic() ||
       Candidate.getNumParams() != Incumbent.getNumParams() ||
       Candidate.getMinRequiredArguments() !=
@@ -5136,7 +5139,7 @@ QualType Sema::ProduceCallSignatureHelp(Scope *S, Expr *Fn,
     Decls.append(UME->decls_begin(), UME->decls_end());
     const bool FirstArgumentIsBase = !UME->isImplicitAccess() && UME->getBase();
     AddFunctionCandidates(Decls, ArgExprs, CandidateSet, TemplateArgs,
-                          /*SuppressUsedConversions=*/false,
+                          /*SuppressUserConversions=*/false,
                           /*PartialOverloading=*/true, FirstArgumentIsBase);
   } else {
     FunctionDecl *FD = nullptr;
@@ -5151,7 +5154,7 @@ QualType Sema::ProduceCallSignatureHelp(Scope *S, Expr *Fn,
       else
         AddOverloadCandidate(FD, DeclAccessPair::make(FD, FD->getAccess()),
                              Args, CandidateSet,
-                             /*SuppressUsedConversions=*/false,
+                             /*SuppressUserConversions=*/false,
                              /*PartialOverloading=*/true);
 
     } else if (auto DC = NakedFn->getType()->getAsCXXRecordDecl()) {
@@ -5168,7 +5171,7 @@ QualType Sema::ProduceCallSignatureHelp(Scope *S, Expr *Fn,
         ArgExprs.append(Args.begin(), Args.end());
         AddFunctionCandidates(R.asUnresolvedSet(), ArgExprs, CandidateSet,
                               /*ExplicitArgs=*/nullptr,
-                              /*SuppressUsedConversions=*/false,
+                              /*SuppressUserConversions=*/false,
                               /*PartialOverloading=*/true);
       }
     } else {
@@ -5216,14 +5219,14 @@ QualType Sema::ProduceConstructorSignatureHelp(Scope *S, QualType Type,
     if (auto *FD = dyn_cast<FunctionDecl>(C)) {
       AddOverloadCandidate(FD, DeclAccessPair::make(FD, C->getAccess()), Args,
                            CandidateSet,
-                           /*SuppressUsedConversions=*/false,
+                           /*SuppressUserConversions=*/false,
                            /*PartialOverloading=*/true,
                            /*AllowExplicit*/ true);
     } else if (auto *FTD = dyn_cast<FunctionTemplateDecl>(C)) {
       AddTemplateOverloadCandidate(
           FTD, DeclAccessPair::make(FTD, C->getAccess()),
           /*ExplicitTemplateArgs=*/nullptr, Args, CandidateSet,
-          /*SuppressUsedConversions=*/false,
+          /*SuppressUserConversions=*/false,
           /*PartialOverloading=*/true);
     }
   }
@@ -5327,18 +5330,21 @@ void Sema::CodeCompleteAfterIf(Scope *S) {
 }
 
 void Sema::CodeCompleteQualifiedId(Scope *S, CXXScopeSpec &SS,
-                                   bool EnteringContext, QualType BaseType,
+                                   bool EnteringContext,
+                                   bool IsUsingDeclaration, QualType BaseType,
                                    QualType PreferredType) {
   if (SS.isEmpty() || !CodeCompleter)
     return;
+
+  CodeCompletionContext CC(CodeCompletionContext::CCC_Symbol, PreferredType);
+  CC.setIsUsingDeclaration(IsUsingDeclaration);
+  CC.setCXXScopeSpecifier(SS);
 
   // We want to keep the scope specifier even if it's invalid (e.g. the scope
   // "a::b::" is not corresponding to any context/namespace in the AST), since
   // it can be useful for global code completion which have information about
   // contexts/symbols that are not in the AST.
   if (SS.isInvalid()) {
-    CodeCompletionContext CC(CodeCompletionContext::CCC_Symbol, PreferredType);
-    CC.setCXXScopeSpecifier(SS);
     // As SS is invalid, we try to collect accessible contexts from the current
     // scope with a dummy lookup so that the completion consumer can try to
     // guess what the specified scope is.
@@ -5368,10 +5374,8 @@ void Sema::CodeCompleteQualifiedId(Scope *S, CXXScopeSpec &SS,
   if (!isDependentScopeSpecifier(SS) && RequireCompleteDeclContext(SS, Ctx))
     return;
 
-  ResultBuilder Results(
-      *this, CodeCompleter->getAllocator(),
-      CodeCompleter->getCodeCompletionTUInfo(),
-      CodeCompletionContext(CodeCompletionContext::CCC_Symbol, PreferredType));
+  ResultBuilder Results(*this, CodeCompleter->getAllocator(),
+                        CodeCompleter->getCodeCompletionTUInfo(), CC);
   if (!PreferredType.isNull())
     Results.setPreferredType(PreferredType);
   Results.EnterNewScope();
@@ -5400,23 +5404,21 @@ void Sema::CodeCompleteQualifiedId(Scope *S, CXXScopeSpec &SS,
                        CodeCompleter->loadExternal());
   }
 
-  auto CC = Results.getCompletionContext();
-  CC.setCXXScopeSpecifier(SS);
-
-  HandleCodeCompleteResults(this, CodeCompleter, CC, Results.data(),
-                            Results.size());
+  HandleCodeCompleteResults(this, CodeCompleter, Results.getCompletionContext(),
+                            Results.data(), Results.size());
 }
 
 void Sema::CodeCompleteUsing(Scope *S) {
   if (!CodeCompleter)
     return;
 
+  // This can be both a using alias or using declaration, in the former we
+  // expect a new name and a symbol in the latter case.
+  CodeCompletionContext Context(CodeCompletionContext::CCC_SymbolOrNewName);
+  Context.setIsUsingDeclaration(true);
+
   ResultBuilder Results(*this, CodeCompleter->getAllocator(),
-                        CodeCompleter->getCodeCompletionTUInfo(),
-                        // This can be both a using alias or using
-                        // declaration, in the former we expect a new name and a
-                        // symbol in the latter case.
-                        CodeCompletionContext::CCC_SymbolOrNewName,
+                        CodeCompleter->getCodeCompletionTUInfo(), Context,
                         &ResultBuilder::IsNestedNameSpecifier);
   Results.EnterNewScope();
 
@@ -5532,9 +5534,10 @@ void Sema::CodeCompleteOperatorName(Scope *S) {
                         &ResultBuilder::IsType);
   Results.EnterNewScope();
 
-  // Add the names of overloadable operators.
+  // Add the names of overloadable operators. Note that OO_Conditional is not
+  // actually overloadable.
 #define OVERLOADED_OPERATOR(Name, Spelling, Token, Unary, Binary, MemberOnly)  \
-  if (std::strcmp(Spelling, "?"))                                              \
+  if (OO_##Name != OO_Conditional)                                             \
     Results.AddResult(Result(Spelling));
 #include "clang/Basic/OperatorKinds.def"
 
@@ -8602,8 +8605,7 @@ void Sema::CodeCompletePreprocessorExpression() {
 
   if (!CodeCompleter || CodeCompleter->includeMacros())
     AddMacroResults(PP, Results,
-                    CodeCompleter ? CodeCompleter->loadExternal() : false,
-                    true);
+                    !CodeCompleter || CodeCompleter->loadExternal(), true);
 
   // defined (<macro>)
   Results.EnterNewScope();
@@ -8800,8 +8802,7 @@ void Sema::GatherGlobalCodeCompletions(
 
   if (!CodeCompleter || CodeCompleter->includeMacros())
     AddMacroResults(PP, Builder,
-                    CodeCompleter ? CodeCompleter->loadExternal() : false,
-                    true);
+                    !CodeCompleter || CodeCompleter->loadExternal(), true);
 
   Results.clear();
   Results.insert(Results.end(), Builder.data(),

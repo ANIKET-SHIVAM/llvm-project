@@ -10,8 +10,10 @@
 #define SCUDO_SECONDARY_H_
 
 #include "common.h"
+#include "list.h"
 #include "mutex.h"
 #include "stats.h"
+#include "string_utils.h"
 
 namespace scudo {
 
@@ -50,7 +52,7 @@ class MapAllocator {
 public:
   void initLinkerInitialized(GlobalStats *S) {
     Stats.initLinkerInitialized();
-    if (S)
+    if (LIKELY(S))
       S->link(&Stats);
   }
   void init(GlobalStats *S) {
@@ -70,20 +72,20 @@ public:
     return getBlockEnd(Ptr) - reinterpret_cast<uptr>(Ptr);
   }
 
-  void printStats() const;
+  void getStats(ScopedString *Str) const;
 
   void disable() { Mutex.lock(); }
 
   void enable() { Mutex.unlock(); }
 
   template <typename F> void iterateOverBlocks(F Callback) const {
-    for (LargeBlock::Header *H = Tail; H != nullptr; H = H->Prev)
-      Callback(reinterpret_cast<uptr>(H) + LargeBlock::getHeaderSize());
+    for (const auto &H : InUseBlocks)
+      Callback(reinterpret_cast<uptr>(&H) + LargeBlock::getHeaderSize());
   }
 
 private:
-  StaticSpinMutex Mutex;
-  LargeBlock::Header *Tail;
+  HybridMutex Mutex;
+  DoublyLinkedList<LargeBlock::Header> InUseBlocks;
   uptr AllocatedBytes;
   uptr FreedBytes;
   uptr LargestSize;

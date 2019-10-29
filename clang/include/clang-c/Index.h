@@ -1356,7 +1356,12 @@ enum CXTranslationUnit_Flags {
    * the case where these warnings are not of interest, as for an IDE for
    * example, which typically shows only the diagnostics in the main file.
    */
-  CXTranslationUnit_IgnoreNonErrorsFromIncludedFiles = 0x4000
+  CXTranslationUnit_IgnoreNonErrorsFromIncludedFiles = 0x4000,
+
+  /**
+   * Tells the preprocessor not to skip excluded conditional blocks.
+   */
+  CXTranslationUnit_RetainExcludedConditionalBlocks = 0x8000
 };
 
 /**
@@ -2546,7 +2551,24 @@ enum CXCursorKind {
    */
   CXCursor_OMPTargetTeamsDistributeSimdDirective = 279,
 
-  CXCursor_LastStmt = CXCursor_OMPTargetTeamsDistributeSimdDirective,
+  /** C++2a std::bit_cast expression.
+   */
+  CXCursor_BuiltinBitCastExpr = 280,
+
+  /** OpenMP master taskloop directive.
+   */
+  CXCursor_OMPMasterTaskLoopDirective = 281,
+
+  /** OpenMP parallel master taskloop directive.
+   */
+  CXCursor_OMPParallelMasterTaskLoopDirective = 282,
+
+  /** OpenMP master taskloop simd directive.
+   */
+  CXCursor_OMPMasterTaskLoopSimdDirective      = 283,
+
+
+  CXCursor_LastStmt = CXCursor_OMPMasterTaskLoopSimdDirective,
 
   /**
    * Cursor that represents the translation unit itself.

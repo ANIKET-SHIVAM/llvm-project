@@ -331,8 +331,12 @@ bool PPCTTIImpl::mightUseCTR(BasicBlock *BB,
           case Intrinsic::ceil:               Opcode = ISD::FCEIL;      break;
           case Intrinsic::trunc:              Opcode = ISD::FTRUNC;     break;
           case Intrinsic::rint:               Opcode = ISD::FRINT;      break;
+          case Intrinsic::lrint:              Opcode = ISD::LRINT;      break;
+          case Intrinsic::llrint:             Opcode = ISD::LLRINT;     break;
           case Intrinsic::nearbyint:          Opcode = ISD::FNEARBYINT; break;
           case Intrinsic::round:              Opcode = ISD::FROUND;     break;
+          case Intrinsic::lround:             Opcode = ISD::LROUND;     break;
+          case Intrinsic::llround:            Opcode = ISD::LLROUND;    break;
           case Intrinsic::minnum:             Opcode = ISD::FMINNUM;    break;
           case Intrinsic::maxnum:             Opcode = ISD::FMAXNUM;    break;
           case Intrinsic::umul_with_overflow: Opcode = ISD::UMULO;      break;
@@ -492,7 +496,7 @@ bool PPCTTIImpl::mightUseCTR(BasicBlock *BB,
 bool PPCTTIImpl::isHardwareLoopProfitable(Loop *L, ScalarEvolution &SE,
                                           AssumptionCache &AC,
                                           TargetLibraryInfo *LibInfo,
-                                          TTI::HardwareLoopInfo &HWLoopInfo) {
+                                          HardwareLoopInfo &HWLoopInfo) {
   const PPCTargetMachine &TM = ST->getTargetMachine();
   TargetSchedModel SchedModel;
   SchedModel.init(ST);
@@ -582,27 +586,49 @@ bool PPCTTIImpl::enableAggressiveInterleaving(bool LoopHasReductions) {
   return LoopHasReductions;
 }
 
-const PPCTTIImpl::TTI::MemCmpExpansionOptions *
-PPCTTIImpl::enableMemCmpExpansion(bool IsZeroCmp) const {
-  static const auto Options = []() {
-    TTI::MemCmpExpansionOptions Options;
-    Options.LoadSizes.push_back(8);
-    Options.LoadSizes.push_back(4);
-    Options.LoadSizes.push_back(2);
-    Options.LoadSizes.push_back(1);
-    return Options;
-  }();
-  return &Options;
+PPCTTIImpl::TTI::MemCmpExpansionOptions
+PPCTTIImpl::enableMemCmpExpansion(bool OptSize, bool IsZeroCmp) const {
+  TTI::MemCmpExpansionOptions Options;
+  Options.LoadSizes = {8, 4, 2, 1};
+  Options.MaxNumLoads = TLI->getMaxExpandSizeMemcmp(OptSize);
+  return Options;
 }
 
 bool PPCTTIImpl::enableInterleavedAccessVectorization() {
   return true;
 }
 
-unsigned PPCTTIImpl::getNumberOfRegisters(bool Vector) {
-  if (Vector && !ST->hasAltivec() && !ST->hasQPX())
-    return 0;
-  return ST->hasVSX() ? 64 : 32;
+unsigned PPCTTIImpl::getNumberOfRegisters(unsigned ClassID) const {
+  assert(ClassID == GPRRC || ClassID == FPRRC ||
+         ClassID == VRRC || ClassID == VSXRC);
+  if (ST->hasVSX()) {
+    assert(ClassID == GPRRC || ClassID == VSXRC);
+    return ClassID == GPRRC ? 32 : 64;
+  }
+  assert(ClassID == GPRRC || ClassID == FPRRC || ClassID == VRRC);
+  return 32;
+}
+
+unsigned PPCTTIImpl::getRegisterClassForType(bool Vector, Type *Ty) const {
+  if (Vector)
+    return ST->hasVSX() ? VSXRC : VRRC;
+  else if (Ty && Ty->getScalarType()->isFloatTy())
+    return ST->hasVSX() ? VSXRC : FPRRC;
+  else
+    return GPRRC;
+}
+
+const char* PPCTTIImpl::getRegisterClassName(unsigned ClassID) const {
+
+  switch (ClassID) {
+    default:
+      llvm_unreachable("unknown register class");
+      return "PPC::unknown register class";
+    case GPRRC:       return "PPC::GPRRC";
+    case FPRRC:       return "PPC::FPRRC";
+    case VRRC:        return "PPC::VRRC";
+    case VSXRC:       return "PPC::VSXRC";
+  }
 }
 
 unsigned PPCTTIImpl::getRegisterBitWidth(bool Vector) const {
@@ -618,7 +644,7 @@ unsigned PPCTTIImpl::getRegisterBitWidth(bool Vector) const {
 
 }
 
-unsigned PPCTTIImpl::getCacheLineSize() {
+unsigned PPCTTIImpl::getCacheLineSize() const {
   // Check first if the user specified a custom line size.
   if (CacheLineSize.getNumOccurrences() > 0)
     return CacheLineSize;
@@ -633,7 +659,7 @@ unsigned PPCTTIImpl::getCacheLineSize() {
   return 64;
 }
 
-unsigned PPCTTIImpl::getPrefetchDistance() {
+unsigned PPCTTIImpl::getPrefetchDistance() const {
   // This seems like a reasonable default for the BG/Q (this pass is enabled, by
   // default, only on the BG/Q).
   return 300;
@@ -757,6 +783,35 @@ int PPCTTIImpl::getVectorInstrCost(unsigned Opcode, Type *Val, unsigned Index) {
       return 0;
 
     return Cost;
+
+  } else if (Val->getScalarType()->isIntegerTy() && Index != -1U) {
+    if (ST->hasP9Altivec()) {
+      if (ISD == ISD::INSERT_VECTOR_ELT)
+        // A move-to VSR and a permute/insert.  Assume vector operation cost
+        // for both (cost will be 2x on P9).
+        return vectorCostAdjustment(2, Opcode, Val, nullptr);
+
+      // It's an extract.  Maybe we can do a cheap move-from VSR.
+      unsigned EltSize = Val->getScalarSizeInBits();
+      if (EltSize == 64) {
+        unsigned MfvsrdIndex = ST->isLittleEndian() ? 1 : 0;
+        if (Index == MfvsrdIndex)
+          return 1;
+      } else if (EltSize == 32) {
+        unsigned MfvsrwzIndex = ST->isLittleEndian() ? 2 : 1;
+        if (Index == MfvsrwzIndex)
+          return 1;
+      }
+
+      // We need a vector extract (or mfvsrld).  Assume vector operation cost.
+      // The cost of the load constant for a vector extract is disregarded
+      // (invariant, easily schedulable).
+      return vectorCostAdjustment(1, Opcode, Val, nullptr);
+      
+    } else if (ST->hasDirectMove())
+      // Assume permute has standard cost.
+      // Assume move-to/move-from VSR have 2x standard cost.
+      return 3;
   }
 
   // Estimated cost of a load-hit-store delay.  This was obtained
@@ -778,8 +833,9 @@ int PPCTTIImpl::getVectorInstrCost(unsigned Opcode, Type *Val, unsigned Index) {
   return Cost;
 }
 
-int PPCTTIImpl::getMemoryOpCost(unsigned Opcode, Type *Src, unsigned Alignment,
-                                unsigned AddressSpace, const Instruction *I) {
+int PPCTTIImpl::getMemoryOpCost(unsigned Opcode, Type *Src,
+                                MaybeAlign Alignment, unsigned AddressSpace,
+                                const Instruction *I) {
   // Legalize the type.
   std::pair<int, MVT> LT = TLI->getTypeLegalizationCost(DL, Src);
   assert((Opcode == Instruction::Load || Opcode == Instruction::Store) &&
@@ -837,7 +893,8 @@ int PPCTTIImpl::getMemoryOpCost(unsigned Opcode, Type *Src, unsigned Alignment,
   // to be decomposed based on the alignment factor.
 
   // Add the cost of each scalar load or store.
-  Cost += LT.first*(SrcBytes/Alignment-1);
+  assert(Alignment);
+  Cost += LT.first * ((SrcBytes / Alignment->value()) - 1);
 
   // For a vector type, there is also scalarization overhead (only for
   // stores, loads are expanded using the vector-load + permutation sequence,
@@ -868,7 +925,8 @@ int PPCTTIImpl::getInterleavedMemoryOpCost(unsigned Opcode, Type *VecTy,
   std::pair<int, MVT> LT = TLI->getTypeLegalizationCost(DL, VecTy);
 
   // Firstly, the cost of load/store operation.
-  int Cost = getMemoryOpCost(Opcode, VecTy, Alignment, AddressSpace);
+  int Cost =
+      getMemoryOpCost(Opcode, VecTy, MaybeAlign(Alignment), AddressSpace);
 
   // PPC, for both Altivec/VSX and QPX, support cheap arbitrary permutations
   // (at least in the sense that there need only be one non-loop-invariant
@@ -880,3 +938,25 @@ int PPCTTIImpl::getInterleavedMemoryOpCost(unsigned Opcode, Type *VecTy,
   return Cost;
 }
 
+bool PPCTTIImpl::canSaveCmp(Loop *L, BranchInst **BI, ScalarEvolution *SE,
+                            LoopInfo *LI, DominatorTree *DT,
+                            AssumptionCache *AC, TargetLibraryInfo *LibInfo) {
+  // Process nested loops first.
+  for (Loop::iterator I = L->begin(), E = L->end(); I != E; ++I)
+    if (canSaveCmp(*I, BI, SE, LI, DT, AC, LibInfo))
+      return false; // Stop search.
+
+  HardwareLoopInfo HWLoopInfo(L);
+
+  if (!HWLoopInfo.canAnalyze(*LI))
+    return false;
+
+  if (!isHardwareLoopProfitable(L, *SE, *AC, LibInfo, HWLoopInfo))
+    return false;
+
+  if (!HWLoopInfo.isHardwareLoopCandidate(*SE, *LI, *DT))
+    return false;
+
+  *BI = HWLoopInfo.ExitBranch;
+  return true;
+}

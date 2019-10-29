@@ -748,6 +748,28 @@ int main(int argc, char **argv) {
     Passes.add(TPC);
   }
 
+  // Change order of loop transformations
+  if (LoopCustomOptz)
+    addPass(Passes,createLoopCustomOptzPass());
+  else {
+    for (unsigned i = 0; i < PassList.size(); ++i) {
+      const PassInfo *PassInf = PassList[i];
+      if ((PassInf->getPassArgument().compare("loop-custom-optz")) != 0)
+        continue;
+      Pass *P = nullptr;
+      if (PassInf->getNormalCtor())
+        P = PassInf->getNormalCtor()();
+      else
+        errs() << argv[0] << ": cannot create pass: "
+               << PassInf->getPassName() << "\n";
+      if (P) {
+        addPass(Passes, P);
+      }
+      PassList.erase(PassList.begin() + i);
+      break;
+    }
+  }
+
   // Create a new optimization pass for each one specified on the command line
   for (unsigned i = 0; i < PassList.size(); ++i) {
     if (StandardLinkOpts &&

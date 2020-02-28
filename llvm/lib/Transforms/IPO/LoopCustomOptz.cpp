@@ -2,12 +2,12 @@
 // Experimental pass added by: Aniket Shivam
 //===----------------------------------------------------------------------===//
 
+#include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Transforms/IPO.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Transforms/IPO.h"
 #include <algorithm>
 #include <iterator>
 #include <set>
@@ -19,22 +19,16 @@ using namespace llvm;
 #define DEBUG_TYPE "loop-custom-optz"
 
 namespace {
+  struct LoopCustomOptz : public ModulePass {
+    static char ID;
 
-class LoopCustomOptz : public ModulePass {
-public:
-  static char ID;
+    explicit LoopCustomOptz()
+      : ModulePass(ID) {
+      initializeLoopCustomOptzPass(*PassRegistry::getPassRegistry());
+    }
 
-  LoopCustomOptz()
-    : ModulePass(ID) {
-    initializeLoopCustomOptzPass(*PassRegistry::getPassRegistry());
-  }
-
-  bool runOnModule(Module &M) override;
-
-private:
-
-};
-
+    bool runOnModule(Module &M) override;
+  };
 } // end anonymous namespace
 
 char LoopCustomOptz::ID = 0;

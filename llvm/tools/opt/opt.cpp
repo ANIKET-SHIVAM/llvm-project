@@ -788,9 +788,9 @@ int main(int argc, char **argv) {
   }
 
   // Change order of loop transformations
-  if (LoopCustomOptz)
+  /*if (LoopCustomOptz)
     addPass(Passes,createLoopCustomOptzPass());
-  else {
+  else */{
     for (unsigned i = 0; i < PassList.size(); ++i) {
       const PassInfo *PassInf = PassList[i];
       if ((PassInf->getPassArgument().compare("loop-custom-optz")) != 0)

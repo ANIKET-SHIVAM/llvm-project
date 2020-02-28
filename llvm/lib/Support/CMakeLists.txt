@@ -1,7 +1,7 @@
-set(system_libs)
-if ( LLVM_ENABLE_ZLIB AND HAVE_LIBZ )
-  set(system_libs ${system_libs} ${ZLIB_LIBRARIES})
+if(LLVM_ENABLE_ZLIB)
+  set(system_libs ${ZLIB_LIBRARY})
 endif()
+
 if( MSVC OR MINGW )
   # libuuid required for FOLDERID_Profile usage in lib/Support/Windows/Path.inc.
   # advapi32 required for CryptAcquireContextW in lib/Support/Windows/Path.inc.
@@ -26,7 +26,7 @@ elseif( CMAKE_HOST_UNIX )
       set(system_libs ${system_libs} ${TERMINFO_LIBS})
     endif()
   endif()
-  if( LLVM_ENABLE_THREADS AND HAVE_LIBATOMIC )
+  if( LLVM_ENABLE_THREADS AND (HAVE_LIBATOMIC OR HAVE_CXX_LIBATOMICS64) )
     set(system_libs ${system_libs} atomic)
   endif()
   set(system_libs ${system_libs} ${LLVM_PTHREAD_LIB})
@@ -51,7 +51,7 @@ else()
   set(Z3_LINK_FILES "")
 endif()
 
-add_llvm_library(LLVMSupport
+add_llvm_component_library(LLVMSupport
   AArch64TargetParser.cpp
   ABIBreak.cpp
   ARMTargetParser.cpp
@@ -116,7 +116,6 @@ add_llvm_library(LLVMSupport
   MD5.cpp
   NativeFormatting.cpp
   Optional.cpp
-  Options.cpp
   Parallel.cpp
   PluginLoader.cpp
   PrettyStackTrace.cpp

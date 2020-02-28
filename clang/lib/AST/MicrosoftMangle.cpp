@@ -10,7 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "clang/AST/Mangle.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/CXXInheritance.h"
@@ -22,9 +21,11 @@
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
+#include "clang/AST/Mangle.h"
 #include "clang/AST/VTableBuilder.h"
 #include "clang/Basic/ABI.h"
 #include "clang/Basic/DiagnosticOptions.h"
+#include "clang/Basic/SourceManager.h"
 #include "clang/Basic/TargetInfo.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/CRC.h"
@@ -279,8 +280,6 @@ class MicrosoftCXXNameMangler {
 
   ASTContext &getASTContext() const { return Context.getASTContext(); }
 
-  // FIXME: If we add support for __ptr32/64 qualifiers, then we should push
-  // this check into mangleQualifiers().
   const bool PointersAre64Bit;
 
 public:
@@ -333,6 +332,13 @@ public:
 private:
   bool isStructorDecl(const NamedDecl *ND) const {
     return ND == Structor || getStructor(ND) == Structor;
+  }
+
+  bool is64BitPointer(Qualifiers Quals) const {
+    LangAS AddrSpace = Quals.getAddressSpace();
+    return AddrSpace == LangAS::ptr64 ||
+           (PointersAre64Bit && !(AddrSpace == LangAS::ptr32_sptr ||
+                                  AddrSpace == LangAS::ptr32_uptr));
   }
 
   void mangleUnqualifiedName(const NamedDecl *ND) {
@@ -592,7 +598,7 @@ void MicrosoftCXXNameMangler::mangleMemberDataPointer(const CXXRecordDecl *RD,
 
   int64_t FieldOffset;
   int64_t VBTableOffset;
-  MSInheritanceAttr::Spelling IM = RD->getMSInheritanceModel();
+  MSInheritanceModel IM = RD->getMSInheritanceModel();
   if (VD) {
     FieldOffset = getASTContext().getFieldOffset(VD);
     assert(FieldOffset % getASTContext().getCharWidth() == 0 &&
@@ -601,7 +607,7 @@ void MicrosoftCXXNameMangler::mangleMemberDataPointer(const CXXRecordDecl *RD,
 
     VBTableOffset = 0;
 
-    if (IM == MSInheritanceAttr::Keyword_virtual_inheritance)
+    if (IM == MSInheritanceModel::Virtual)
       FieldOffset -= getASTContext().getOffsetOfBaseWithVBPtr(RD).getQuantity();
   } else {
     FieldOffset = RD->nullFieldOffsetIsZero() ? 0 : -1;
@@ -611,12 +617,10 @@ void MicrosoftCXXNameMangler::mangleMemberDataPointer(const CXXRecordDecl *RD,
 
   char Code = '\0';
   switch (IM) {
-  case MSInheritanceAttr::Keyword_single_inheritance:      Code = '0'; break;
-  case MSInheritanceAttr::Keyword_multiple_inheritance:    Code = '0'; break;
-  case MSInheritanceAttr::Keyword_virtual_inheritance:     Code = 'F'; break;
-  case MSInheritanceAttr::Keyword_unspecified_inheritance: Code = 'G'; break;
-  case MSInheritanceAttr::SpellingNotCalculated:
-    llvm_unreachable("not reachable");
+  case MSInheritanceModel::Single:      Code = '0'; break;
+  case MSInheritanceModel::Multiple:    Code = '0'; break;
+  case MSInheritanceModel::Virtual:     Code = 'F'; break;
+  case MSInheritanceModel::Unspecified: Code = 'G'; break;
   }
 
   Out << '$' << Code;
@@ -626,9 +630,9 @@ void MicrosoftCXXNameMangler::mangleMemberDataPointer(const CXXRecordDecl *RD,
   // The C++ standard doesn't allow base-to-derived member pointer conversions
   // in template parameter contexts, so the vbptr offset of data member pointers
   // is always zero.
-  if (MSInheritanceAttr::hasVBPtrOffsetField(IM))
+  if (inheritanceModelHasVBPtrOffsetField(IM))
     mangleNumber(0);
-  if (MSInheritanceAttr::hasVBTableOffsetField(IM))
+  if (inheritanceModelHasVBTableOffsetField(IM))
     mangleNumber(VBTableOffset);
 }
 
@@ -640,16 +644,14 @@ MicrosoftCXXNameMangler::mangleMemberFunctionPointer(const CXXRecordDecl *RD,
   //                           ::= $I? <name> <number> <number>
   //                           ::= $J? <name> <number> <number> <number>
 
-  MSInheritanceAttr::Spelling IM = RD->getMSInheritanceModel();
+  MSInheritanceModel IM = RD->getMSInheritanceModel();
 
   char Code = '\0';
   switch (IM) {
-  case MSInheritanceAttr::Keyword_single_inheritance:      Code = '1'; break;
-  case MSInheritanceAttr::Keyword_multiple_inheritance:    Code = 'H'; break;
-  case MSInheritanceAttr::Keyword_virtual_inheritance:     Code = 'I'; break;
-  case MSInheritanceAttr::Keyword_unspecified_inheritance: Code = 'J'; break;
-  case MSInheritanceAttr::SpellingNotCalculated:
-    llvm_unreachable("not reachable");
+  case MSInheritanceModel::Single:      Code = '1'; break;
+  case MSInheritanceModel::Multiple:    Code = 'H'; break;
+  case MSInheritanceModel::Virtual:     Code = 'I'; break;
+  case MSInheritanceModel::Unspecified: Code = 'J'; break;
   }
 
   // If non-virtual, mangle the name.  If virtual, mangle as a virtual memptr
@@ -676,25 +678,24 @@ MicrosoftCXXNameMangler::mangleMemberFunctionPointer(const CXXRecordDecl *RD,
       mangleFunctionEncoding(MD, /*ShouldMangle=*/true);
     }
 
-    if (VBTableOffset == 0 &&
-        IM == MSInheritanceAttr::Keyword_virtual_inheritance)
+    if (VBTableOffset == 0 && IM == MSInheritanceModel::Virtual)
       NVOffset -= getASTContext().getOffsetOfBaseWithVBPtr(RD).getQuantity();
   } else {
     // Null single inheritance member functions are encoded as a simple nullptr.
-    if (IM == MSInheritanceAttr::Keyword_single_inheritance) {
+    if (IM == MSInheritanceModel::Single) {
       Out << "$0A@";
       return;
     }
-    if (IM == MSInheritanceAttr::Keyword_unspecified_inheritance)
+    if (IM == MSInheritanceModel::Unspecified)
       VBTableOffset = -1;
     Out << '$' << Code;
   }
 
-  if (MSInheritanceAttr::hasNVOffsetField(/*IsMemberFunction=*/true, IM))
+  if (inheritanceModelHasNVOffsetField(/*IsMemberFunction=*/true, IM))
     mangleNumber(static_cast<uint32_t>(NVOffset));
-  if (MSInheritanceAttr::hasVBPtrOffsetField(IM))
+  if (inheritanceModelHasVBPtrOffsetField(IM))
     mangleNumber(VBPtrOffset);
-  if (MSInheritanceAttr::hasVBTableOffsetField(IM))
+  if (inheritanceModelHasVBTableOffsetField(IM))
     mangleNumber(VBTableOffset);
 }
 
@@ -710,7 +711,7 @@ void MicrosoftCXXNameMangler::mangleVirtualMemPtrThunk(
   Out << "$B";
   mangleNumber(OffsetInVFTable);
   Out << 'A';
-  mangleCallingConvention(MD->getType()->getAs<FunctionProtoType>());
+  mangleCallingConvention(MD->getType()->castAs<FunctionProtoType>());
 }
 
 void MicrosoftCXXNameMangler::mangleName(const NamedDecl *ND) {
@@ -1301,7 +1302,7 @@ void MicrosoftCXXNameMangler::mangleSourceName(StringRef Name) {
   BackRefVec::iterator Found = llvm::find(NameBackReferences, Name);
   if (Found == NameBackReferences.end()) {
     if (NameBackReferences.size() < 10)
-      NameBackReferences.push_back(Name);
+      NameBackReferences.push_back(std::string(Name));
     Out << Name << '@';
   } else {
     Out << (Found - NameBackReferences.begin());
@@ -1708,8 +1709,10 @@ MicrosoftCXXNameMangler::mangleRefQualifier(RefQualifierKind RefQualifier) {
 
 void MicrosoftCXXNameMangler::manglePointerExtQualifiers(Qualifiers Quals,
                                                          QualType PointeeType) {
-  if (PointersAre64Bit &&
-      (PointeeType.isNull() || !PointeeType->isFunctionType()))
+  // Check if this is a default 64-bit pointer or has __ptr64 qualifier.
+  bool is64Bit = PointeeType.isNull() ? PointersAre64Bit :
+      is64BitPointer(PointeeType.getQualifiers());
+  if (is64Bit && (PointeeType.isNull() || !PointeeType->isFunctionType()))
     Out << 'E';
 
   if (Quals.hasRestrict())
@@ -1869,6 +1872,10 @@ void MicrosoftCXXNameMangler::mangleAddressSpaceType(QualType T,
     case LangAS::cuda_shared:
       Extra.mangleSourceName("_ASCUshared");
       break;
+    case LangAS::ptr32_sptr:
+    case LangAS::ptr32_uptr:
+    case LangAS::ptr64:
+      llvm_unreachable("don't mangle ptr address spaces with _AS");
     }
   }
 
@@ -2602,10 +2609,13 @@ void MicrosoftCXXNameMangler::mangleType(const PointerType *T, Qualifiers Quals,
   manglePointerCVQualifiers(Quals);
   manglePointerExtQualifiers(Quals, PointeeType);
 
-  if (PointeeType.getQualifiers().hasAddressSpace())
-    mangleAddressSpaceType(PointeeType, PointeeType.getQualifiers(), Range);
-  else
+  // For pointer size address spaces, go down the same type mangling path as
+  // non address space types.
+  LangAS AddrSpace = PointeeType.getQualifiers().getAddressSpace();
+  if (isPtrSizeAddressSpace(AddrSpace) || AddrSpace == LangAS::Default)
     mangleType(PointeeType, Range);
+  else
+    mangleAddressSpaceType(PointeeType, PointeeType.getQualifiers(), Range);
 }
 
 void MicrosoftCXXNameMangler::mangleType(const ObjCObjectPointerType *T,
@@ -2692,9 +2702,7 @@ void MicrosoftCXXNameMangler::mangleType(const VectorType *T, Qualifiers Quals,
   // doesn't match the Intel types uses a custom mangling below.
   size_t OutSizeBefore = Out.tell();
   if (!isa<ExtVectorType>(T)) {
-    llvm::Triple::ArchType AT =
-        getASTContext().getTargetInfo().getTriple().getArch();
-    if (AT == llvm::Triple::x86 || AT == llvm::Triple::x86_64) {
+    if (getASTContext().getTargetInfo().getTriple().isX86()) {
       if (Width == 64 && ET->getKind() == BuiltinType::LongLong) {
         mangleArtificialTagType(TTK_Union, "__m64");
       } else if (Width >= 128) {

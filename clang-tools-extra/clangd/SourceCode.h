@@ -78,14 +78,6 @@ llvm::Optional<Range> getTokenRange(const SourceManager &SM,
 llvm::Expected<SourceLocation> sourceLocationInMainFile(const SourceManager &SM,
                                                         Position P);
 
-/// Get the beginning SourceLocation at a specified \p Pos in the main file.
-/// May be invalid if Pos is, or if there's no identifier or operators.
-/// The returned position is in the main file, callers may prefer to
-/// obtain the macro expansion location.
-SourceLocation getBeginningOfIdentifier(const Position &Pos,
-                                        const SourceManager &SM,
-                                        const LangOptions &LangOpts);
-
 /// Returns true iff \p Loc is inside the main file. This function handles
 /// file & macro locations. For macro locations, returns iff the macro is being
 /// expanded inside the main file.
@@ -106,12 +98,6 @@ SourceLocation includeHashLoc(FileID IncludedFile, const SourceManager &SM);
 ///   * symbols controlled and defined by a compile command-line option
 ///     `-DName=foo`, the spelling location will be "<command line>".
 bool isSpelledInSource(SourceLocation Loc, const SourceManager &SM);
-
-/// Returns the spelling location of the token at Loc if isSpelledInSource,
-/// otherwise its expansion location.
-/// FIXME: Most callers likely want some variant of "file location" instead.
-SourceLocation spellingLocIfSpelled(SourceLocation Loc,
-                                    const SourceManager &SM);
 
 /// Turns a token range into a half-open range and checks its correctness.
 /// The resulting range will have only valid source location on both sides, both
@@ -223,6 +209,9 @@ struct Edit {
   /// Checks whether the Replacements are applicable to given Code.
   bool canApplyTo(llvm::StringRef Code) const;
 };
+/// A mapping from absolute file path (the one used for accessing the underlying
+/// VFS) to edits.
+using FileEdits = llvm::StringMap<Edit>;
 
 /// Formats the edits and code around it according to Style. Changes
 /// Replacements to formatted ones if succeeds.
@@ -231,6 +220,11 @@ llvm::Error reformatEdit(Edit &E, const format::FormatStyle &Style);
 /// Collects identifiers with counts in the source code.
 llvm::StringMap<unsigned> collectIdentifiers(llvm::StringRef Content,
                                              const format::FormatStyle &Style);
+
+/// Collects all ranges of the given identifier in the source code.
+std::vector<Range> collectIdentifierRanges(llvm::StringRef Identifier,
+                                           llvm::StringRef Content,
+                                           const LangOptions &LangOpts);
 
 /// Collects words from the source code.
 /// Unlike collectIdentifiers:
@@ -287,9 +281,17 @@ struct DefinedMacro {
   llvm::StringRef Name;
   const MacroInfo *Info;
 };
-// Gets the macro at a specified \p Loc.
+/// Gets the macro at a specified \p Loc.
 llvm::Optional<DefinedMacro> locateMacroAt(SourceLocation Loc,
                                            Preprocessor &PP);
+
+/// Infers whether this is a header from the FileName and LangOpts (if
+/// presents).
+bool isHeaderFile(llvm::StringRef FileName,
+                  llvm::Optional<LangOptions> LangOpts = llvm::None);
+
+/// Returns true if the given location is in a generated protobuf file.
+bool isProtoFile(SourceLocation Loc, const SourceManager &SourceMgr);
 
 } // namespace clangd
 } // namespace clang

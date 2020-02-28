@@ -55,7 +55,6 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Attributes.h"
@@ -83,13 +82,16 @@
 #include "llvm/IR/Type.h"
 #include "llvm/IR/User.h"
 #include "llvm/IR/Value.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/SpecialCaseList.h"
+#include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -159,6 +161,17 @@ static cl::opt<bool> ClDebugNonzeroLabels(
     cl::desc("Insert calls to __dfsan_nonzero_label on observing a parameter, "
              "load or return with a nonzero label"),
     cl::Hidden);
+
+// Experimental feature that inserts callbacks for certain data events.
+// Currently callbacks are only inserted for stores.
+//
+// If this flag is set to true, the user must provide definitions for the
+// following callback functions:
+//   void __dfsan_store_callback(dfsan_label Label);
+static cl::opt<bool> ClEventCallbacks(
+    "dfsan-event-callbacks",
+    cl::desc("Insert calls to __dfsan_*_callback functions on data events."),
+    cl::Hidden, cl::init(false));
 
 static StringRef GetGlobalTypeString(const GlobalValue &G) {
   // Types of GlobalVariables are always pointer types.
@@ -343,6 +356,7 @@ class DataFlowSanitizer : public ModulePass {
   FunctionType *DFSanSetLabelFnTy;
   FunctionType *DFSanNonzeroLabelFnTy;
   FunctionType *DFSanVarargWrapperFnTy;
+  FunctionType *DFSanStoreCallbackFnTy;
   FunctionCallee DFSanUnionFn;
   FunctionCallee DFSanCheckedUnionFn;
   FunctionCallee DFSanUnionLoadFn;
@@ -350,6 +364,7 @@ class DataFlowSanitizer : public ModulePass {
   FunctionCallee DFSanSetLabelFn;
   FunctionCallee DFSanNonzeroLabelFn;
   FunctionCallee DFSanVarargWrapperFn;
+  FunctionCallee DFSanStoreCallbackFn;
   MDNode *ColdCallWeights;
   DFSanABIList ABIList;
   DenseMap<Value *, Function *> UnwrappedFnMap;
@@ -422,7 +437,7 @@ struct DFSanFunction {
   Value *combineOperandShadows(Instruction *Inst);
   Value *loadShadow(Value *ShadowAddr, uint64_t Size, uint64_t Align,
                     Instruction *Pos);
-  void storeShadow(Value *Addr, uint64_t Size, uint64_t Align, Value *Shadow,
+  void storeShadow(Value *Addr, uint64_t Size, Align Alignment, Value *Shadow,
                    Instruction *Pos);
 };
 
@@ -479,7 +494,9 @@ DataFlowSanitizer::DataFlowSanitizer(
   std::vector<std::string> AllABIListFiles(std::move(ABIListFiles));
   AllABIListFiles.insert(AllABIListFiles.end(), ClABIListFiles.begin(),
                          ClABIListFiles.end());
-  ABIList.set(SpecialCaseList::createOrDie(AllABIListFiles));
+  // FIXME: should we propagate vfs::FileSystem to this constructor?
+  ABIList.set(
+      SpecialCaseList::createOrDie(AllABIListFiles, *vfs::getRealFileSystem()));
 }
 
 FunctionType *DataFlowSanitizer::getArgsFunctionType(FunctionType *T) {
@@ -579,6 +596,8 @@ bool DataFlowSanitizer::doInitialization(Module &M) {
       Type::getVoidTy(*Ctx), None, /*isVarArg=*/false);
   DFSanVarargWrapperFnTy = FunctionType::get(
       Type::getVoidTy(*Ctx), Type::getInt8PtrTy(*Ctx), /*isVarArg=*/false);
+  DFSanStoreCallbackFnTy =
+      FunctionType::get(Type::getVoidTy(*Ctx), ShadowTy, /*isVarArg=*/false);
 
   if (GetArgTLSPtr) {
     Type *ArgTLSTy = ArrayType::get(ShadowTy, 64);
@@ -624,7 +643,7 @@ DataFlowSanitizer::WrapperKind DataFlowSanitizer::getWrapperKind(Function *F) {
 }
 
 void DataFlowSanitizer::addGlobalNamePrefix(GlobalValue *GV) {
-  std::string GVName = GV->getName(), Prefix = "dfs$";
+  std::string GVName = std::string(GV->getName()), Prefix = "dfs$";
   GV->setName(Prefix + GVName);
 
   // Try to change the name of the function in module inline asm.  We only do
@@ -779,6 +798,9 @@ bool DataFlowSanitizer::runOnModule(Module &M) {
   DFSanVarargWrapperFn = Mod->getOrInsertFunction("__dfsan_vararg_wrapper",
                                                   DFSanVarargWrapperFnTy);
 
+  DFSanStoreCallbackFn = Mod->getOrInsertFunction("__dfsan_store_callback",
+                                                  DFSanStoreCallbackFnTy);
+
   std::vector<Function *> FnsToInstrument;
   SmallPtrSet<Function *, 2> FnsWithNativeABI;
   for (Function &i : M) {
@@ -789,7 +811,8 @@ bool DataFlowSanitizer::runOnModule(Module &M) {
         &i != DFSanUnimplementedFn.getCallee()->stripPointerCasts() &&
         &i != DFSanSetLabelFn.getCallee()->stripPointerCasts() &&
         &i != DFSanNonzeroLabelFn.getCallee()->stripPointerCasts() &&
-        &i != DFSanVarargWrapperFn.getCallee()->stripPointerCasts())
+        &i != DFSanVarargWrapperFn.getCallee()->stripPointerCasts() &&
+        &i != DFSanStoreCallbackFn.getCallee()->stripPointerCasts())
       FnsToInstrument.push_back(&i);
   }
 
@@ -1190,7 +1213,7 @@ Value *DFSanFunction::loadShadow(Value *Addr, uint64_t Size, uint64_t Align,
     }
   }
 
-  uint64_t ShadowAlign = Align * DFS.ShadowWidth / 8;
+  const MaybeAlign ShadowAlign(Align * DFS.ShadowWidth / 8);
   SmallVector<const Value *, 2> Objs;
   GetUnderlyingObjects(Addr, Objs, Pos->getModule()->getDataLayout());
   bool AllConstants = true;
@@ -1212,7 +1235,7 @@ Value *DFSanFunction::loadShadow(Value *Addr, uint64_t Size, uint64_t Align,
     return DFS.ZeroShadow;
   case 1: {
     LoadInst *LI = new LoadInst(DFS.ShadowTy, ShadowAddr, "", Pos);
-    LI->setAlignment(MaybeAlign(ShadowAlign));
+    LI->setAlignment(ShadowAlign);
     return LI;
   }
   case 2: {
@@ -1312,7 +1335,6 @@ void DFSanVisitor::visitLoadInst(LoadInst &LI) {
   } else {
     Align = 1;
   }
-  IRBuilder<> IRB(&LI);
   Value *Shadow = DFSF.loadShadow(LI.getPointerOperand(), Size, Align, &LI);
   if (ClCombinePointerLabelsOnLoad) {
     Value *PtrShadow = DFSF.getShadow(LI.getPointerOperand());
@@ -1324,7 +1346,7 @@ void DFSanVisitor::visitLoadInst(LoadInst &LI) {
   DFSF.setShadow(&LI, Shadow);
 }
 
-void DFSanFunction::storeShadow(Value *Addr, uint64_t Size, uint64_t Align,
+void DFSanFunction::storeShadow(Value *Addr, uint64_t Size, Align Alignment,
                                 Value *Shadow, Instruction *Pos) {
   if (AllocaInst *AI = dyn_cast<AllocaInst>(Addr)) {
     const auto i = AllocaShadowMap.find(AI);
@@ -1335,7 +1357,7 @@ void DFSanFunction::storeShadow(Value *Addr, uint64_t Size, uint64_t Align,
     }
   }
 
-  uint64_t ShadowAlign = Align * DFS.ShadowWidth / 8;
+  const Align ShadowAlign(Alignment.value() * (DFS.ShadowWidth / 8));
   IRBuilder<> IRB(Pos);
   Value *ShadowAddr = DFS.getShadowAddress(Addr, Pos);
   if (Shadow == DFS.ZeroShadow) {
@@ -1382,21 +1404,21 @@ void DFSanVisitor::visitStoreInst(StoreInst &SI) {
   if (Size == 0)
     return;
 
-  uint64_t Align;
-  if (ClPreserveAlignment) {
-    Align = SI.getAlignment();
-    if (Align == 0)
-      Align = DL.getABITypeAlignment(SI.getValueOperand()->getType());
-  } else {
-    Align = 1;
-  }
+  const Align Alignement =
+      ClPreserveAlignment ? DL.getValueOrABITypeAlignment(
+                                SI.getAlign(), SI.getValueOperand()->getType())
+                          : Align(1);
 
   Value* Shadow = DFSF.getShadow(SI.getValueOperand());
   if (ClCombinePointerLabelsOnStore) {
     Value *PtrShadow = DFSF.getShadow(SI.getPointerOperand());
     Shadow = DFSF.combineShadows(Shadow, PtrShadow, &SI);
   }
-  DFSF.storeShadow(SI.getPointerOperand(), Size, Align, Shadow, &SI);
+  DFSF.storeShadow(SI.getPointerOperand(), Size, Alignement, Shadow, &SI);
+  if (ClEventCallbacks) {
+    IRBuilder<> IRB(&SI);
+    IRB.CreateCall(DFSF.DFS.DFSanStoreCallbackFn, Shadow);
+  }
 }
 
 void DFSanVisitor::visitUnaryOperator(UnaryOperator &UO) {

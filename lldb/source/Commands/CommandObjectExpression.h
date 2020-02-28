@@ -6,15 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_CommandObjectExpression_h_
-#define liblldb_CommandObjectExpression_h_
+#ifndef LLDB_SOURCE_COMMANDS_COMMANDOBJECTEXPRESSION_H
+#define LLDB_SOURCE_COMMANDS_COMMANDOBJECTEXPRESSION_H
 
 #include "lldb/Core/IOHandler.h"
 #include "lldb/Interpreter/CommandObject.h"
 #include "lldb/Interpreter/OptionGroupBoolean.h"
 #include "lldb/Interpreter/OptionGroupFormat.h"
 #include "lldb/Interpreter/OptionGroupValueObjectDisplay.h"
-#include "lldb/Target/ExecutionContext.h"
 #include "lldb/lldb-private-enumerations.h"
 namespace lldb_private {
 
@@ -84,4 +83,4 @@ protected:
 
 } // namespace lldb_private
 
-#endif // liblldb_CommandObjectExpression_h_
+#endif // LLDB_SOURCE_COMMANDS_COMMANDOBJECTEXPRESSION_H

@@ -77,7 +77,8 @@ multiple file formats.
 .. option:: --strip-all, -S
 
  For ELF objects, remove from the output all symbols and non-alloc sections not
- within segments, except for .gnu.warning sections and the section name table.
+ within segments, except for .gnu.warning, .ARM.attribute sections and the
+ section name table.
 
  For COFF objects, remove all symbols, debug sections, and relocations from the
  output.
@@ -99,10 +100,6 @@ multiple file formats.
 .. option:: --version, -V
 
  Display the version of the :program:`llvm-strip` executable.
-
-.. option:: @<FILE>
-
- Read command-line options and commands from response file `<FILE>`.
 
 .. option:: --wildcard, -w
 
@@ -127,6 +124,10 @@ multiple file formats.
 
   The order of wildcards does not matter. For example, ``-w -N '*' -N '!x'`` is
   the same as ``-w -N '!x' -N '*'``.
+
+.. option:: @<FILE>
+
+ Read command-line options and commands from response file `<FILE>`.
 
 COFF-SPECIFIC OPTIONS
 ---------------------

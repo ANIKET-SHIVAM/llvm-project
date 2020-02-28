@@ -20,6 +20,7 @@
 #include "lld/Common/Timer.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/BinaryStreamReader.h"
 #include "llvm/Support/Debug.h"
@@ -40,9 +41,8 @@ using namespace llvm::COFF;
 using namespace llvm::object;
 using namespace llvm::support;
 using namespace llvm::support::endian;
-
-namespace lld {
-namespace coff {
+using namespace lld;
+using namespace lld::coff;
 
 /* To re-generate DOSProgram:
 $ cat > /tmp/DOSProgram.asm
@@ -289,7 +289,7 @@ private:
 static Timer codeLayoutTimer("Code Layout", Timer::root());
 static Timer diskCommitTimer("Commit Output File", Timer::root());
 
-void writeResult() { Writer().run(); }
+void lld::coff::writeResult() { Writer().run(); }
 
 void OutputSection::addChunk(Chunk *c) {
   chunks.push_back(c);
@@ -1148,6 +1148,11 @@ void Writer::createSymbolAndStringTable() {
       continue;
     if ((sec->header.Characteristics & IMAGE_SCN_MEM_DISCARDABLE) == 0)
       continue;
+    if (config->warnLongSectionNames) {
+      warn("section name " + sec->name +
+           " is longer than 8 characters and will use a non-standard string "
+           "table");
+    }
     sec->setStringTableOff(addEntryToStringTable(sec->name));
   }
 
@@ -1299,6 +1304,8 @@ template <typename PEHeaderTy> void Writer::writeHeader() {
     coff->Characteristics |= IMAGE_FILE_32BIT_MACHINE;
   if (config->dll)
     coff->Characteristics |= IMAGE_FILE_DLL;
+  if (config->driverUponly)
+    coff->Characteristics |= IMAGE_FILE_UP_SYSTEM_ONLY;
   if (!config->relocatable)
     coff->Characteristics |= IMAGE_FILE_RELOCS_STRIPPED;
   if (config->swaprunCD)
@@ -1346,6 +1353,8 @@ template <typename PEHeaderTy> void Writer::writeHeader() {
   pe->SizeOfHeapCommit = config->heapCommit;
   if (config->appContainer)
     pe->DLLCharacteristics |= IMAGE_DLL_CHARACTERISTICS_APPCONTAINER;
+  if (config->driverWdm)
+    pe->DLLCharacteristics |= IMAGE_DLL_CHARACTERISTICS_WDM_DRIVER;
   if (config->dynamicBase)
     pe->DLLCharacteristics |= IMAGE_DLL_CHARACTERISTICS_DYNAMIC_BASE;
   if (config->highEntropyVA)
@@ -1834,7 +1843,7 @@ void Writer::sortExceptionTable() {
         [](const Entry &a, const Entry &b) { return a.begin < b.begin; });
     return;
   }
-  errs() << "warning: don't know how to handle .pdata.\n";
+  lld::errs() << "warning: don't know how to handle .pdata.\n";
 }
 
 // The CRT section contains, among other things, the array of function
@@ -1940,6 +1949,3 @@ PartialSection *Writer::findPartialSection(StringRef name, uint32_t outChars) {
     return it->second;
   return nullptr;
 }
-
-} // namespace coff
-} // namespace lld

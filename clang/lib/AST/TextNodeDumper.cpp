@@ -15,6 +15,7 @@
 #include "clang/AST/DeclOpenMP.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/LocInfoType.h"
+#include "clang/Basic/SourceManager.h"
 
 using namespace clang;
 
@@ -488,6 +489,9 @@ void TextNodeDumper::visitInlineCommandComment(
     break;
   case comments::InlineCommandComment::RenderEmphasized:
     OS << " RenderEmphasized";
+    break;
+  case comments::InlineCommandComment::RenderAnchor:
+    OS << " RenderAnchor";
     break;
   }
 
@@ -1198,6 +1202,11 @@ void TextNodeDumper::VisitAutoType(const AutoType *T) {
     OS << " decltype(auto)";
   if (!T->isDeduced())
     OS << " undeduced";
+  if (T->isConstrained()) {
+    dumpDeclRef(T->getTypeConstraintConcept());
+    for (const auto &Arg : T->getTypeConstraintArguments())
+      VisitTemplateArgument(Arg);
+  }
 }
 
 void TextNodeDumper::VisitTemplateSpecializationType(
@@ -1336,6 +1345,17 @@ void TextNodeDumper::VisitFunctionDecl(const FunctionDecl *D) {
   // ParmVarDecls yet.
   if (!D->param_empty() && !D->param_begin())
     OS << " <<<NULL params x " << D->getNumParams() << ">>>";
+}
+
+void TextNodeDumper::VisitLifetimeExtendedTemporaryDecl(
+    const LifetimeExtendedTemporaryDecl *D) {
+  OS << " extended by ";
+  dumpBareDeclRef(D->getExtendingDecl());
+  OS << " mangling ";
+  {
+    ColorScope Color(OS, ShowColors, ValueColor);
+    OS << D->getManglingNumber();
+  }
 }
 
 void TextNodeDumper::VisitFieldDecl(const FieldDecl *D) {
@@ -1680,7 +1700,16 @@ void TextNodeDumper::VisitBuiltinTemplateDecl(const BuiltinTemplateDecl *D) {
 }
 
 void TextNodeDumper::VisitTemplateTypeParmDecl(const TemplateTypeParmDecl *D) {
-  if (D->wasDeclaredWithTypename())
+  if (const auto *TC = D->getTypeConstraint()) {
+    OS << " ";
+    dumpBareDeclRef(TC->getNamedConcept());
+    if (TC->getNamedConcept() != TC->getFoundDecl()) {
+      OS << " (";
+      dumpBareDeclRef(TC->getFoundDecl());
+      OS << ")";
+    }
+    Visit(TC->getImmediatelyDeclaredConstraint());
+  } else if (D->wasDeclaredWithTypename())
     OS << " typename";
   else
     OS << " class";
@@ -1768,12 +1797,6 @@ void TextNodeDumper::VisitLinkageSpecDecl(const LinkageSpecDecl *D) {
     break;
   case LinkageSpecDecl::lang_cxx:
     OS << " C++";
-    break;
-  case LinkageSpecDecl::lang_cxx_11:
-    OS << " C++11";
-    break;
-  case LinkageSpecDecl::lang_cxx_14:
-    OS << " C++14";
     break;
   }
 }
@@ -1921,6 +1944,8 @@ void TextNodeDumper::VisitObjCPropertyDecl(const ObjCPropertyDecl *D) {
       OS << " unsafe_unretained";
     if (Attrs & ObjCPropertyDecl::OBJC_PR_class)
       OS << " class";
+    if (Attrs & ObjCPropertyDecl::OBJC_PR_direct)
+      OS << " direct";
     if (Attrs & ObjCPropertyDecl::OBJC_PR_getter)
       dumpDeclRef(D->getGetterMethodDecl(), "getter");
     if (Attrs & ObjCPropertyDecl::OBJC_PR_setter)

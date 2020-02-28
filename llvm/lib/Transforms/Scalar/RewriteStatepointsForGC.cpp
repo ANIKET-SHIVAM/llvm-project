@@ -54,6 +54,7 @@
 #include "llvm/IR/User.h"
 #include "llvm/IR/Value.h"
 #include "llvm/IR/ValueHandle.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
@@ -1269,7 +1270,7 @@ static void CreateGCRelocates(ArrayRef<Value *> LiveVariables,
                               const int LiveStart,
                               ArrayRef<Value *> BasePtrs,
                               Instruction *StatepointToken,
-                              IRBuilder<> Builder) {
+                              IRBuilder<> &Builder) {
   if (LiveVariables.empty())
     return;
 

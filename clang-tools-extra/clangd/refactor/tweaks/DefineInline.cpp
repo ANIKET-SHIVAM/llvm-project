@@ -32,6 +32,7 @@
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/TokenKinds.h"
+#include "clang/Driver/Types.h"
 #include "clang/Index/IndexDataConsumer.h"
 #include "clang/Index/IndexSymbol.h"
 #include "clang/Index/IndexingAction.h"
@@ -95,7 +96,7 @@ const FunctionDecl *getSelectedFunction(const SelectionTree::Node *SelNode) {
 }
 
 // Checks the decls mentioned in Source are visible in the context of Target.
-// Achives that by checking declaraions occur before target location in
+// Achieves that by checking declarations occur before target location in
 // translation unit or declared in the same class.
 bool checkDeclsAreVisible(const llvm::DenseSet<const Decl *> &DeclRefs,
                           const FunctionDecl *Target, const SourceManager &SM) {
@@ -135,8 +136,10 @@ bool checkDeclsAreVisible(const llvm::DenseSet<const Decl *> &DeclRefs,
   return true;
 }
 
-// Rewrites body of FD to fully-qualify all of the decls inside.
-llvm::Expected<std::string> qualifyAllDecls(const FunctionDecl *FD) {
+// Rewrites body of FD by re-spelling all of the names to make sure they are
+// still valid in context of Target.
+llvm::Expected<std::string> qualifyAllDecls(const FunctionDecl *FD,
+                                            const FunctionDecl *Target) {
   // There are three types of spellings that needs to be qualified in a function
   // body:
   // - Types:       Foo                 -> ns::Foo
@@ -147,16 +150,16 @@ llvm::Expected<std::string> qualifyAllDecls(const FunctionDecl *FD) {
   //    using ns3 = ns2     -> using ns3 = ns1::ns2
   //
   // Go over all references inside a function body to generate replacements that
-  // will fully qualify those. So that body can be moved into an arbitrary file.
+  // will qualify those. So that body can be moved into an arbitrary file.
   // We perform the qualification by qualyfying the first type/decl in a
   // (un)qualified name. e.g:
   //    namespace a { namespace b { class Bar{}; void foo(); } }
   //    b::Bar x; -> a::b::Bar x;
   //    foo(); -> a::b::foo();
-  // FIXME: Instead of fully qualyfying we should try deducing visible scopes at
-  // target location and generate minimal edits.
 
+  auto *TargetContext = Target->getLexicalDeclContext();
   const SourceManager &SM = FD->getASTContext().getSourceManager();
+
   tooling::Replacements Replacements;
   bool HadErrors = false;
   findExplicitReferences(FD->getBody(), [&](ReferenceLoc Ref) {
@@ -193,7 +196,8 @@ llvm::Expected<std::string> qualifyAllDecls(const FunctionDecl *FD) {
     if (!ND->getDeclContext()->isNamespace())
       return;
 
-    std::string Qualifier = printNamespaceScope(*ND->getDeclContext());
+    const std::string Qualifier = getQualification(
+        FD->getASTContext(), TargetContext, Target->getBeginLoc(), ND);
     if (auto Err = Replacements.add(
             tooling::Replacement(SM, Ref.NameLoc, 0, Qualifier))) {
       HadErrors = true;
@@ -226,6 +230,107 @@ llvm::Expected<std::string> qualifyAllDecls(const FunctionDecl *FD) {
   return QualifiedFunc->substr(BodyBegin, BodyEnd - BodyBegin + 1);
 }
 
+/// Generates Replacements for changing template and function parameter names in
+/// \p Dest to be the same as in \p Source.
+llvm::Expected<tooling::Replacements>
+renameParameters(const FunctionDecl *Dest, const FunctionDecl *Source) {
+  llvm::DenseMap<const Decl *, std::string> ParamToNewName;
+  llvm::DenseMap<const NamedDecl *, std::vector<SourceLocation>> RefLocs;
+  auto HandleParam = [&](const NamedDecl *DestParam,
+                         const NamedDecl *SourceParam) {
+    // No need to rename if parameters already have the same name.
+    if (DestParam->getName() == SourceParam->getName())
+      return;
+    std::string NewName;
+    // Unnamed parameters won't be visited in findExplicitReferences. So add
+    // them here.
+    if (DestParam->getName().empty()) {
+      RefLocs[DestParam].push_back(DestParam->getLocation());
+      // If decl is unnamed in destination we pad the new name to avoid gluing
+      // with previous token, e.g. foo(int^) shouldn't turn into foo(intx).
+      NewName = " ";
+    }
+    NewName.append(std::string(SourceParam->getName()));
+    ParamToNewName[DestParam->getCanonicalDecl()] = std::move(NewName);
+  };
+
+  // Populate mapping for template parameters.
+  auto *DestTempl = Dest->getDescribedFunctionTemplate();
+  auto *SourceTempl = Source->getDescribedFunctionTemplate();
+  assert(bool(DestTempl) == bool(SourceTempl));
+  if (DestTempl) {
+    const auto *DestTPL = DestTempl->getTemplateParameters();
+    const auto *SourceTPL = SourceTempl->getTemplateParameters();
+    assert(DestTPL->size() == SourceTPL->size());
+
+    for (size_t I = 0, EP = DestTPL->size(); I != EP; ++I)
+      HandleParam(DestTPL->getParam(I), SourceTPL->getParam(I));
+  }
+
+  // Populate mapping for function params.
+  assert(Dest->param_size() == Source->param_size());
+  for (size_t I = 0, E = Dest->param_size(); I != E; ++I)
+    HandleParam(Dest->getParamDecl(I), Source->getParamDecl(I));
+
+  const SourceManager &SM = Dest->getASTContext().getSourceManager();
+  const LangOptions &LangOpts = Dest->getASTContext().getLangOpts();
+  // Collect other references in function signature, i.e parameter types and
+  // default arguments.
+  findExplicitReferences(
+      // Use function template in case of templated functions to visit template
+      // parameters.
+      DestTempl ? llvm::dyn_cast<Decl>(DestTempl) : llvm::dyn_cast<Decl>(Dest),
+      [&](ReferenceLoc Ref) {
+        if (Ref.Targets.size() != 1)
+          return;
+        const auto *Target =
+            llvm::cast<NamedDecl>(Ref.Targets.front()->getCanonicalDecl());
+        auto It = ParamToNewName.find(Target);
+        if (It == ParamToNewName.end())
+          return;
+        RefLocs[Target].push_back(Ref.NameLoc);
+      });
+
+  // Now try to generate edits for all the refs.
+  tooling::Replacements Replacements;
+  for (auto &Entry : RefLocs) {
+    const auto *OldDecl = Entry.first;
+    llvm::StringRef OldName = OldDecl->getName();
+    llvm::StringRef NewName = ParamToNewName[OldDecl];
+    for (SourceLocation RefLoc : Entry.second) {
+      CharSourceRange ReplaceRange;
+      // In case of unnamed parameters, we have an empty char range, whereas we
+      // have a tokenrange at RefLoc with named parameters.
+      if (OldName.empty())
+        ReplaceRange = CharSourceRange::getCharRange(RefLoc, RefLoc);
+      else
+        ReplaceRange = CharSourceRange::getTokenRange(RefLoc, RefLoc);
+      // If occurence is coming from a macro expansion, try to get back to the
+      // file range.
+      if (RefLoc.isMacroID()) {
+        ReplaceRange = Lexer::makeFileCharRange(ReplaceRange, SM, LangOpts);
+        // Bail out if we need to replace macro bodies.
+        if (ReplaceRange.isInvalid()) {
+          auto Err = llvm::createStringError(
+              llvm::inconvertibleErrorCode(),
+              "Cant rename parameter inside macro body.");
+          elog("define inline: {0}", Err);
+          return std::move(Err);
+        }
+      }
+
+      if (auto Err = Replacements.add(
+              tooling::Replacement(SM, ReplaceRange, NewName))) {
+        elog("define inline: Couldn't replace parameter name for {0} to {1}: "
+             "{2}",
+             OldName, NewName, Err);
+        return std::move(Err);
+      }
+    }
+  }
+  return Replacements;
+}
+
 // Returns the canonical declaration for the given FunctionDecl. This will
 // usually be the first declaration in current translation unit with the
 // exception of template specialization.
@@ -254,6 +359,25 @@ const SourceLocation getBeginLoc(const FunctionDecl *FD) {
   if (auto *FTD = FD->getDescribedFunctionTemplate())
     return FTD->getBeginLoc();
   return FD->getBeginLoc();
+}
+
+llvm::Optional<tooling::Replacement>
+addInlineIfInHeader(const FunctionDecl *FD) {
+  // This includes inline functions and constexpr functions.
+  if (FD->isInlined() || llvm::isa<CXXMethodDecl>(FD))
+    return llvm::None;
+  // Primary template doesn't need inline.
+  if (FD->isTemplated() && !FD->isFunctionTemplateSpecialization())
+    return llvm::None;
+
+  const SourceManager &SM = FD->getASTContext().getSourceManager();
+  llvm::StringRef FileName = SM.getFilename(FD->getLocation());
+
+  // If it is not a header we don't need to mark function as "inline".
+  if (!isHeaderFile(FileName, FD->getASTContext().getLangOpts()))
+    return llvm::None;
+
+  return tooling::Replacement(SM, FD->getInnerLocStart(), 0, "inline ");
 }
 
 /// Moves definition of a function/method to its declaration location.
@@ -287,7 +411,7 @@ public:
     if (!SelNode)
       return false;
     Source = getSelectedFunction(SelNode);
-    if (!Source || !Source->isThisDeclarationADefinition())
+    if (!Source || !Source->hasBody())
       return false;
     // Only the last level of template parameter locations are not kept in AST,
     // so if we are inlining a method that is in a templated class, there is no
@@ -314,15 +438,15 @@ public:
 
     // Check if the decls referenced in function body are visible in the
     // declaration location.
-    if (!checkDeclsAreVisible(getNonLocalDeclRefs(Sel.AST, Source), Target,
-                              Sel.AST.getSourceManager()))
+    if (!checkDeclsAreVisible(getNonLocalDeclRefs(*Sel.AST, Source), Target,
+                              Sel.AST->getSourceManager()))
       return false;
 
     return true;
   }
 
   Expected<Effect> apply(const Selection &Sel) override {
-    const auto &AST = Sel.AST.getASTContext();
+    const auto &AST = Sel.AST->getASTContext();
     const auto &SM = AST.getSourceManager();
 
     auto Semicolon = getSemicolonForDecl(Target);
@@ -332,12 +456,24 @@ public:
           "Couldn't find semicolon for target declaration.");
     }
 
-    auto QualifiedBody = qualifyAllDecls(Source);
+    auto AddInlineIfNecessary = addInlineIfInHeader(Target);
+    auto ParamReplacements = renameParameters(Target, Source);
+    if (!ParamReplacements)
+      return ParamReplacements.takeError();
+
+    auto QualifiedBody = qualifyAllDecls(Source, Target);
     if (!QualifiedBody)
       return QualifiedBody.takeError();
 
     const tooling::Replacement SemicolonToFuncBody(SM, *Semicolon, 1,
                                                    *QualifiedBody);
+    tooling::Replacements TargetFileReplacements(SemicolonToFuncBody);
+    TargetFileReplacements = TargetFileReplacements.merge(*ParamReplacements);
+    if (AddInlineIfNecessary) {
+      if (auto Err = TargetFileReplacements.add(*AddInlineIfNecessary))
+        return std::move(Err);
+    }
+
     auto DefRange = toHalfOpenFileRange(
         SM, AST.getLangOpts(),
         SM.getExpansionRange(CharSourceRange::getCharRange(getBeginLoc(Source),
@@ -355,7 +491,7 @@ public:
     llvm::SmallVector<std::pair<std::string, Edit>, 2> Edits;
     // Edit for Target.
     auto FE = Effect::fileEdit(SM, SM.getFileID(*Semicolon),
-                               tooling::Replacements(SemicolonToFuncBody));
+                               std::move(TargetFileReplacements));
     if (!FE)
       return FE.takeError();
     Edits.push_back(std::move(*FE));

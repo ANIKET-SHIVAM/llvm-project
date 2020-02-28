@@ -326,7 +326,7 @@ void MachineBasicBlock::print(raw_ostream &OS, ModuleSlotTracker &MST,
     OS << "landing-pad";
     HasAttributes = true;
   }
-  if (getAlignment() != Align::None()) {
+  if (getAlignment() != Align(1)) {
     OS << (HasAttributes ? ", " : " (");
     OS << "align " << Log2(getAlignment());
     HasAttributes = true;
@@ -871,8 +871,9 @@ bool MachineBasicBlock::canFallThrough() {
   return getFallThrough() != nullptr;
 }
 
-MachineBasicBlock *MachineBasicBlock::SplitCriticalEdge(MachineBasicBlock *Succ,
-                                                        Pass &P) {
+MachineBasicBlock *MachineBasicBlock::SplitCriticalEdge(
+    MachineBasicBlock *Succ, Pass &P,
+    std::vector<SparseBitVector<>> *LiveInSets) {
   if (!canSplitCriticalEdge(Succ))
     return nullptr;
 
@@ -1003,7 +1004,10 @@ MachineBasicBlock *MachineBasicBlock::SplitCriticalEdge(MachineBasicBlock *Succ,
       }
     }
     // Update relevant live-through information.
-    LV->addNewBlock(NMBB, this, Succ);
+    if (LiveInSets != nullptr)
+      LV->addNewBlock(NMBB, this, Succ, *LiveInSets);
+    else
+      LV->addNewBlock(NMBB, this, Succ);
   }
 
   if (LIS) {
@@ -1109,15 +1113,19 @@ bool MachineBasicBlock::canSplitCriticalEdge(
   if (Succ->isEHPad())
     return false;
 
-  const MachineFunction *MF = getParent();
+  // Splitting the critical edge to a callbr's indirect block isn't advised.
+  // Don't do it in this generic function.
+  if (isInlineAsmBrIndirectTarget(Succ))
+    return false;
 
+  const MachineFunction *MF = getParent();
   // Performance might be harmed on HW that implements branching using exec mask
   // where both sides of the branches are always executed.
   if (MF->getTarget().requiresStructuredCFG())
     return false;
 
   // We may need to update this's terminator, but we can't do that if
-  // AnalyzeBranch fails. If this uses a jump table, we won't touch it.
+  // analyzeBranch fails. If this uses a jump table, we won't touch it.
   const TargetInstrInfo *TII = MF->getSubtarget().getInstrInfo();
   MachineBasicBlock *TBB = nullptr, *FBB = nullptr;
   SmallVector<MachineOperand, 4> Cond;
@@ -1234,7 +1242,7 @@ bool MachineBasicBlock::CorrectExtraCFGEdges(MachineBasicBlock *DestA,
                                              MachineBasicBlock *DestB,
                                              bool IsCond) {
   // The values of DestA and DestB frequently come from a call to the
-  // 'TargetInstrInfo::AnalyzeBranch' method. We take our meaning of the initial
+  // 'TargetInstrInfo::analyzeBranch' method. We take our meaning of the initial
   // values from there.
   //
   // 1. If both DestA and DestB are null, then the block ends with no branches
@@ -1395,8 +1403,7 @@ MachineBasicBlock::computeRegisterLiveness(const TargetRegisterInfo *TRI,
 
     --N;
 
-    MachineOperandIteratorBase::PhysRegInfo Info =
-        ConstMIOperands(*I).analyzePhysReg(Reg, TRI);
+    PhysRegInfo Info = AnalyzePhysRegInBundle(*I, Reg, TRI);
 
     // Register is live when we read it here.
     if (Info.Read)
@@ -1434,8 +1441,7 @@ MachineBasicBlock::computeRegisterLiveness(const TargetRegisterInfo *TRI,
 
       --N;
 
-      MachineOperandIteratorBase::PhysRegInfo Info =
-          ConstMIOperands(*I).analyzePhysReg(Reg, TRI);
+      PhysRegInfo Info = AnalyzePhysRegInBundle(*I, Reg, TRI);
 
       // Defs happen after uses so they take precedence if both are present.
 
@@ -1461,6 +1467,11 @@ MachineBasicBlock::computeRegisterLiveness(const TargetRegisterInfo *TRI,
 
     } while (I != begin() && N > 0);
   }
+
+  // If all the instructions before this in the block are debug instructions,
+  // skip over them.
+  while (I != begin() && std::prev(I)->isDebugInstr())
+    --I;
 
   // Did we get to the start of the block?
   if (I == begin()) {

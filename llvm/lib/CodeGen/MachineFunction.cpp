@@ -270,6 +270,31 @@ getOrCreateJumpTableInfo(unsigned EntryKind) {
   return JumpTableInfo;
 }
 
+DenormalMode MachineFunction::getDenormalMode(const fltSemantics &FPType) const {
+  if (&FPType == &APFloat::IEEEsingle()) {
+    Attribute Attr = F.getFnAttribute("denormal-fp-math-f32");
+    StringRef Val = Attr.getValueAsString();
+    if (!Val.empty())
+      return parseDenormalFPAttribute(Val);
+
+    // If the f32 variant of the attribute isn't specified, try to use the
+    // generic one.
+  }
+
+  // TODO: Should probably avoid the connection to the IR and store directly
+  // in the MachineFunction.
+  Attribute Attr = F.getFnAttribute("denormal-fp-math");
+
+  // FIXME: This should assume IEEE behavior on an unspecified
+  // attribute. However, the one current user incorrectly assumes a non-IEEE
+  // target by default.
+  StringRef Val = Attr.getValueAsString();
+  if (Val.empty())
+    return DenormalMode::getInvalid();
+
+  return parseDenormalFPAttribute(Val);
+}
+
 /// Should we be emitting segmented stack stuff for the function
 bool MachineFunction::shouldSplitStack() const {
   return getFunction().hasFnAttribute("split-stack");
@@ -368,7 +393,7 @@ MachineFunction::DeleteMachineInstr(MachineInstr *MI) {
   // be triggered during the implementation of support for the
   // call site info of a new architecture. If the assertion is triggered,
   // back trace will tell where to insert a call to updateCallSiteInfo().
-  assert((!MI->isCall(MachineInstr::IgnoreBundle) ||
+  assert((!MI->isCandidateForCallSiteEntry() ||
           CallSitesInfo.find(MI) == CallSitesInfo.end()) &&
          "Call site info was not updated!");
   // Strip it for parts. The operand array and the MI object itself are
@@ -469,6 +494,12 @@ uint32_t *MachineFunction::allocateRegMask() {
   return Mask;
 }
 
+ArrayRef<int> MachineFunction::allocateShuffleMask(ArrayRef<int> Mask) {
+  int* AllocMask = Allocator.Allocate<int>(Mask.size());
+  copy(Mask, AllocMask);
+  return {AllocMask, Mask.size()};
+}
+
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 LLVM_DUMP_METHOD void MachineFunction::dump() const {
   print(dbgs());
@@ -518,6 +549,13 @@ void MachineFunction::print(raw_ostream &OS, const SlotIndexes *Indexes) const {
   }
 
   OS << "\n# End machine code for function " << getName() << ".\n\n";
+}
+
+/// True if this function needs frame moves for debug or exceptions.
+bool MachineFunction::needsFrameMoves() const {
+  return getMMI().hasDebugInfo() ||
+         getTarget().Options.ForceDwarfFrameSection ||
+         F.needsUnwindTableEntry();
 }
 
 namespace llvm {
@@ -823,21 +861,36 @@ try_next:;
   return FilterID;
 }
 
-void MachineFunction::moveCallSiteInfo(const MachineInstr *Old,
-                                       const MachineInstr *New) {
-  assert(New->isCall() && "Call site info refers only to call instructions!");
+MachineFunction::CallSiteInfoMap::iterator
+MachineFunction::getCallSiteInfo(const MachineInstr *MI) {
+  assert(MI->isCandidateForCallSiteEntry() &&
+         "Call site info refers only to call (MI) candidates");
 
-  CallSiteInfoMap::iterator CSIt = getCallSiteInfo(Old);
-  if (CSIt == CallSitesInfo.end())
-    return;
+  if (!Target.Options.EnableDebugEntryValues)
+    return CallSitesInfo.end();
+  return CallSitesInfo.find(MI);
+}
 
-  CallSiteInfo CSInfo = std::move(CSIt->second);
-  CallSitesInfo.erase(CSIt);
-  CallSitesInfo[New] = CSInfo;
+/// Return the call machine instruction or find a call within bundle.
+static const MachineInstr *getCallInstr(const MachineInstr *MI) {
+  if (!MI->isBundle())
+    return MI;
+
+  for (auto &BMI : make_range(getBundleStart(MI->getIterator()),
+                              getBundleEnd(MI->getIterator())))
+    if (BMI.isCandidateForCallSiteEntry())
+      return &BMI;
+
+  llvm_unreachable("Unexpected bundle without a call site candidate");
 }
 
 void MachineFunction::eraseCallSiteInfo(const MachineInstr *MI) {
-  CallSiteInfoMap::iterator CSIt = getCallSiteInfo(MI);
+  assert(MI->shouldUpdateCallSiteInfo() &&
+         "Call site info refers only to call (MI) candidates or "
+         "candidates inside bundles");
+
+  const MachineInstr *CallMI = getCallInstr(MI);
+  CallSiteInfoMap::iterator CSIt = getCallSiteInfo(CallMI);
   if (CSIt == CallSitesInfo.end())
     return;
   CallSitesInfo.erase(CSIt);
@@ -845,13 +898,38 @@ void MachineFunction::eraseCallSiteInfo(const MachineInstr *MI) {
 
 void MachineFunction::copyCallSiteInfo(const MachineInstr *Old,
                                        const MachineInstr *New) {
-  assert(New->isCall() && "Call site info refers only to call instructions!");
+  assert(Old->shouldUpdateCallSiteInfo() &&
+         "Call site info refers only to call (MI) candidates or "
+         "candidates inside bundles");
 
-  CallSiteInfoMap::iterator CSIt = getCallSiteInfo(Old);
+  if (!New->isCandidateForCallSiteEntry())
+    return eraseCallSiteInfo(Old);
+
+  const MachineInstr *OldCallMI = getCallInstr(Old);
+  CallSiteInfoMap::iterator CSIt = getCallSiteInfo(OldCallMI);
   if (CSIt == CallSitesInfo.end())
     return;
 
   CallSiteInfo CSInfo = CSIt->second;
+  CallSitesInfo[New] = CSInfo;
+}
+
+void MachineFunction::moveCallSiteInfo(const MachineInstr *Old,
+                                       const MachineInstr *New) {
+  assert(Old->shouldUpdateCallSiteInfo() &&
+         "Call site info refers only to call (MI) candidates or "
+         "candidates inside bundles");
+
+  if (!New->isCandidateForCallSiteEntry())
+    return eraseCallSiteInfo(Old);
+
+  const MachineInstr *OldCallMI = getCallInstr(Old);
+  CallSiteInfoMap::iterator CSIt = getCallSiteInfo(OldCallMI);
+  if (CSIt == CallSitesInfo.end())
+    return;
+
+  CallSiteInfo CSInfo = std::move(CSIt->second);
+  CallSitesInfo.erase(CSIt);
   CallSitesInfo[New] = CSInfo;
 }
 

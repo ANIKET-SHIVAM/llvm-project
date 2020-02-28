@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_BreakpointResolver_h_
-#define liblldb_BreakpointResolver_h_
+#ifndef LLDB_BREAKPOINT_BREAKPOINTRESOLVER_H
+#define LLDB_BREAKPOINT_BREAKPOINTRESOLVER_H
 
 #include "lldb/Breakpoint/Breakpoint.h"
 #include "lldb/Core/Address.h"
@@ -44,9 +44,6 @@ public:
   ///   The breakpoint that owns this resolver.
   /// \param[in] resolverType
   ///   The concrete breakpoint resolver type for this breakpoint.
-  ///
-  /// \result
-  ///   Returns breakpoint location id.
   BreakpointResolver(Breakpoint *bkpt, unsigned char resolverType,
                      lldb::addr_t offset = 0);
 
@@ -68,12 +65,6 @@ public:
   ///   The offset to add to all locations.
   void SetOffset(lldb::addr_t offset);
 
-  /// This updates the offset for this breakpoint.  All the locations
-  /// currently set for this breakpoint will have their offset adjusted when
-  /// this is called.
-  ///
-  /// \param[in] offset
-  ///   The offset to add to all locations.
   lldb::addr_t GetOffset() const { return m_offset; }
 
   /// In response to this method the resolver scans all the modules in the
@@ -186,7 +177,7 @@ protected:
   };
   static const char
       *g_option_names[static_cast<uint32_t>(OptionNames::LastOptionName)];
-  
+
   virtual void NotifyBreakpointSet() {};
 
 public:
@@ -227,4 +218,4 @@ private:
 
 } // namespace lldb_private
 
-#endif // liblldb_BreakpointResolver_h_
+#endif // LLDB_BREAKPOINT_BREAKPOINTRESOLVER_H

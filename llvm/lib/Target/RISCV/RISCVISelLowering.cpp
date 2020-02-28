@@ -30,6 +30,7 @@
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/DiagnosticPrinter.h"
+#include "llvm/IR/IntrinsicsRISCV.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -49,6 +50,20 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
 
   RISCVABI::ABI ABI = Subtarget.getTargetABI();
   assert(ABI != RISCVABI::ABI_Unknown && "Improperly initialised target ABI");
+
+  if ((ABI == RISCVABI::ABI_ILP32F || ABI == RISCVABI::ABI_LP64F) &&
+      !Subtarget.hasStdExtF()) {
+    errs() << "Hard-float 'f' ABI can't be used for a target that "
+                "doesn't support the F instruction set extension (ignoring "
+                          "target-abi)\n";
+    ABI = Subtarget.is64Bit() ? RISCVABI::ABI_LP64 : RISCVABI::ABI_ILP32;
+  } else if ((ABI == RISCVABI::ABI_ILP32D || ABI == RISCVABI::ABI_LP64D) &&
+             !Subtarget.hasStdExtD()) {
+    errs() << "Hard-float 'd' ABI can't be used for a target that "
+              "doesn't support the D instruction set extension (ignoring "
+              "target-abi)\n";
+    ABI = Subtarget.is64Bit() ? RISCVABI::ABI_LP64 : RISCVABI::ABI_ILP32;
+  }
 
   switch (ABI) {
   default:
@@ -581,10 +596,7 @@ SDValue RISCVTargetLowering::lowerGlobalTLSAddress(SDValue Op,
   int64_t Offset = N->getOffset();
   MVT XLenVT = Subtarget.getXLenVT();
 
-  // Non-PIC TLS lowering should always use the LocalExec model.
-  TLSModel::Model Model = isPositionIndependent()
-                              ? getTargetMachine().getTLSModel(N->getGlobal())
-                              : TLSModel::LocalExec;
+  TLSModel::Model Model = getTargetMachine().getTLSModel(N->getGlobal());
 
   SDValue Addr;
   switch (Model) {
@@ -872,8 +884,8 @@ void RISCVTargetLowering::ReplaceNodeResults(SDNode *N,
     SDValue RCW =
         DAG.getNode(RISCVISD::READ_CYCLE_WIDE, DL, VTs, N->getOperand(0));
 
-    Results.push_back(RCW);
-    Results.push_back(RCW.getValue(1));
+    Results.push_back(
+        DAG.getNode(ISD::BUILD_PAIR, DL, MVT::i64, RCW, RCW.getValue(1)));
     Results.push_back(RCW.getValue(2));
     break;
   }
@@ -2018,10 +2030,6 @@ bool RISCVTargetLowering::isEligibleForTailCallOptimization(
   auto &Caller = MF.getFunction();
   auto CallerCC = Caller.getCallingConv();
 
-  // Do not tail call opt functions with "disable-tail-calls" attribute.
-  if (Caller.getFnAttribute("disable-tail-calls").getValueAsString() == "true")
-    return false;
-
   // Exception-handling functions need a special set of instructions to
   // indicate a return to the hardware. Tail-calling another function would
   // probably break this.
@@ -2132,17 +2140,17 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
 
     SDValue Arg = OutVals[i];
     unsigned Size = Flags.getByValSize();
-    unsigned Align = Flags.getByValAlign();
+    Align Alignment = Flags.getNonZeroByValAlign();
 
-    int FI = MF.getFrameInfo().CreateStackObject(Size, Align, /*isSS=*/false);
+    int FI =
+        MF.getFrameInfo().CreateStackObject(Size, Alignment, /*isSS=*/false);
     SDValue FIPtr = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
     SDValue SizeNode = DAG.getConstant(Size, DL, XLenVT);
 
-    Chain = DAG.getMemcpy(Chain, DL, FIPtr, Arg, SizeNode, Align,
+    Chain = DAG.getMemcpy(Chain, DL, FIPtr, Arg, SizeNode, Alignment,
                           /*IsVolatile=*/false,
-                          /*AlwaysInline=*/false,
-                          IsTailCall, MachinePointerInfo(),
-                          MachinePointerInfo());
+                          /*AlwaysInline=*/false, IsTailCall,
+                          MachinePointerInfo(), MachinePointerInfo());
     ByValArgs.push_back(FIPtr);
   }
 
@@ -2484,6 +2492,10 @@ void RISCVTargetLowering::validateCCReservedRegs(
       }))
     F.getContext().diagnose(DiagnosticInfoUnsupported{
         F, "Argument register required, but has been reserved."});
+}
+
+bool RISCVTargetLowering::mayBeEmittedAsTailCall(const CallInst *CI) const {
+  return CI->isTailCall();
 }
 
 const char *RISCVTargetLowering::getTargetNodeName(unsigned Opcode) const {
@@ -2893,4 +2905,23 @@ bool RISCVTargetLowering::shouldExtendTypeInLibCall(EVT Type) const {
     return false;
 
   return true;
+}
+
+#define GET_REGISTER_MATCHER
+#include "RISCVGenAsmMatcher.inc"
+
+Register
+RISCVTargetLowering::getRegisterByName(const char *RegName, LLT VT,
+                                       const MachineFunction &MF) const {
+  Register Reg = MatchRegisterAltName(RegName);
+  if (Reg == RISCV::NoRegister)
+    Reg = MatchRegisterName(RegName);
+  if (Reg == RISCV::NoRegister)
+    report_fatal_error(
+        Twine("Invalid register name \"" + StringRef(RegName) + "\"."));
+  BitVector ReservedRegs = Subtarget.getRegisterInfo()->getReservedRegs(MF);
+  if (!ReservedRegs.test(Reg) && !Subtarget.isRegisterReservedByUser(Reg))
+    report_fatal_error(Twine("Trying to obtain non-reserved register \"" +
+                             StringRef(RegName) + "\"."));
+  return Reg;
 }

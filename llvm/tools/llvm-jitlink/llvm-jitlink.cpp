@@ -57,6 +57,10 @@ static cl::list<std::string>
                cl::ZeroOrMore);
 
 static cl::opt<std::string>
+    CheckName("check-name", cl::desc("Name of checks to match against"),
+              cl::init("jitlink-check"));
+
+static cl::opt<std::string>
     EntryPointName("entry", cl::desc("Symbol to call as main entry point"),
                    cl::init(""));
 
@@ -170,11 +174,11 @@ static void dumpSectionContents(raw_ostream &OS, LinkGraph &G) {
 
   std::sort(Sections.begin(), Sections.end(),
             [](const Section *LHS, const Section *RHS) {
-              if (LHS->symbols_empty() && RHS->symbols_empty())
+              if (llvm::empty(LHS->symbols()) && llvm::empty(RHS->symbols()))
                 return false;
-              if (LHS->symbols_empty())
+              if (llvm::empty(LHS->symbols()))
                 return false;
-              if (RHS->symbols_empty())
+              if (llvm::empty(RHS->symbols()))
                 return true;
               SectionRange LHSRange(*LHS);
               SectionRange RHSRange(*RHS);
@@ -183,7 +187,7 @@ static void dumpSectionContents(raw_ostream &OS, LinkGraph &G) {
 
   for (auto *S : Sections) {
     OS << S->getName() << " content:";
-    if (S->symbols_empty()) {
+    if (llvm::empty(S->symbols())) {
       OS << "\n  section empty\n";
       continue;
     }
@@ -392,8 +396,18 @@ static std::unique_ptr<jitlink::JITLinkMemoryManager> createMemoryManager() {
   return std::make_unique<jitlink::InProcessMemoryManager>();
 }
 
-Session::Session(Triple TT)
-    : MemMgr(createMemoryManager()), ObjLayer(ES, *MemMgr), TT(std::move(TT)) {
+Expected<std::unique_ptr<Session>> Session::Create(Triple TT) {
+  Error Err = Error::success();
+  std::unique_ptr<Session> S(new Session(std::move(TT), Err));
+  if (Err)
+    return std::move(Err);
+  return std::move(S);
+}
+
+// FIXME: Move to createJITDylib if/when we start using Platform support in
+// llvm-jitlink.
+Session::Session(Triple TT, Error &Err)
+    : ObjLayer(ES, createMemoryManager()), TT(std::move(TT)) {
 
   /// Local ObjectLinkingLayer::Plugin class to forward modifyPassConfig to the
   /// Session.
@@ -408,6 +422,15 @@ Session::Session(Triple TT)
   private:
     Session &S;
   };
+
+  ErrorAsOutParameter _(&Err);
+
+  if (auto MainJDOrErr = ES.createJITDylib("main"))
+    MainJD = &*MainJDOrErr;
+  else {
+    Err = MainJDOrErr.takeError();
+    return;
+  }
 
   if (!NoExec && !TT.isOSWindows())
     ObjLayer.addPlugin(std::make_unique<EHFrameRegistrationPlugin>(
@@ -556,7 +579,7 @@ Error loadProcessSymbols(Session &S) {
   auto FilterMainEntryPoint = [InternedEntryPointName](SymbolStringPtr Name) {
     return Name != InternedEntryPointName;
   };
-  S.ES.getMainJITDylib().addGenerator(
+  S.MainJD->addGenerator(
       ExitOnErr(orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(
           GlobalPrefix, FilterMainEntryPoint)));
 
@@ -585,30 +608,32 @@ Error loadObjects(Session &S) {
   LLVM_DEBUG(dbgs() << "Creating JITDylibs...\n");
   {
     // Create a "main" JITLinkDylib.
-    auto &MainJD = S.ES.getMainJITDylib();
-    IdxToJLD[0] = &MainJD;
-    S.JDSearchOrder.push_back(&MainJD);
-    LLVM_DEBUG(dbgs() << "  0: " << MainJD.getName() << "\n");
+    IdxToJLD[0] = S.MainJD;
+    S.JDSearchOrder.push_back(S.MainJD);
+    LLVM_DEBUG(dbgs() << "  0: " << S.MainJD->getName() << "\n");
 
     // Add any extra JITLinkDylibs from the command line.
     std::string JDNamePrefix("lib");
     for (auto JLDItr = JITLinkDylibs.begin(), JLDEnd = JITLinkDylibs.end();
          JLDItr != JLDEnd; ++JLDItr) {
-      auto &JD = S.ES.createJITDylib(JDNamePrefix + *JLDItr);
+      auto JD = S.ES.createJITDylib(JDNamePrefix + *JLDItr);
+      if (!JD)
+        return JD.takeError();
       unsigned JDIdx =
           JITLinkDylibs.getPosition(JLDItr - JITLinkDylibs.begin());
-      IdxToJLD[JDIdx] = &JD;
-      S.JDSearchOrder.push_back(&JD);
-      LLVM_DEBUG(dbgs() << "  " << JDIdx << ": " << JD.getName() << "\n");
+      IdxToJLD[JDIdx] = &*JD;
+      S.JDSearchOrder.push_back(&*JD);
+      LLVM_DEBUG(dbgs() << "  " << JDIdx << ": " << JD->getName() << "\n");
     }
 
     // Set every dylib to link against every other, in command line order.
     for (auto *JD : S.JDSearchOrder) {
-      JITDylibSearchList O;
+      auto LookupFlags = JITDylibLookupFlags::MatchExportedSymbolsOnly;
+      JITDylibSearchOrder O;
       for (auto *JD2 : S.JDSearchOrder) {
         if (JD2 == JD)
           continue;
-        O.push_back(std::make_pair(JD2, false));
+        O.push_back(std::make_pair(JD2, LookupFlags));
       }
       JD->setSearchOrder(std::move(O));
     }
@@ -741,10 +766,11 @@ Error runChecks(Session &S) {
       S.TT.isLittleEndian() ? support::little : support::big,
       Disassembler.get(), InstPrinter.get(), dbgs());
 
+  std::string CheckLineStart = "# " + CheckName + ":";
   for (auto &CheckFile : CheckFiles) {
     auto CheckerFileBuf =
         ExitOnErr(errorOrToExpected(MemoryBuffer::getFile(CheckFile)));
-    if (!Checker.checkAllRulesInBuffer("# jitlink-check:", &*CheckerFileBuf))
+    if (!Checker.checkAllRulesInBuffer(CheckLineStart, &*CheckerFileBuf))
       ExitOnErr(make_error<StringError>(
           "Some checks in " + CheckFile + " failed", inconvertibleErrorCode()));
   }
@@ -761,25 +787,6 @@ static void dumpSessionStats(Session &S) {
 
 static Expected<JITEvaluatedSymbol> getMainEntryPoint(Session &S) {
   return S.ES.lookup(S.JDSearchOrder, EntryPointName);
-}
-
-Expected<int> runEntryPoint(Session &S, JITEvaluatedSymbol EntryPoint) {
-  assert(EntryPoint.getAddress() && "Entry point address should not be null");
-
-  constexpr const char *JITProgramName = "<llvm-jitlink jit'd code>";
-  auto PNStorage = std::make_unique<char[]>(strlen(JITProgramName) + 1);
-  strcpy(PNStorage.get(), JITProgramName);
-
-  std::vector<const char *> EntryPointArgs;
-  EntryPointArgs.push_back(PNStorage.get());
-  for (auto &InputArg : InputArgv)
-    EntryPointArgs.push_back(InputArg.data());
-  EntryPointArgs.push_back(nullptr);
-
-  using MainTy = int (*)(int, const char *[]);
-  MainTy EntryPointPtr = reinterpret_cast<MainTy>(EntryPoint.getAddress());
-
-  return EntryPointPtr(EntryPointArgs.size() - 1, EntryPointArgs.data());
 }
 
 struct JITLinkTimers {
@@ -803,40 +810,42 @@ int main(int argc, char *argv[]) {
   std::unique_ptr<JITLinkTimers> Timers =
       ShowTimes ? std::make_unique<JITLinkTimers>() : nullptr;
 
-  Session S(getFirstFileTriple());
+  auto S = ExitOnErr(Session::Create(getFirstFileTriple()));
 
-  ExitOnErr(sanitizeArguments(S));
+  ExitOnErr(sanitizeArguments(*S));
 
   if (!NoProcessSymbols)
-    ExitOnErr(loadProcessSymbols(S));
+    ExitOnErr(loadProcessSymbols(*S));
   ExitOnErr(loadDylibs());
 
 
   {
     TimeRegion TR(Timers ? &Timers->LoadObjectsTimer : nullptr);
-    ExitOnErr(loadObjects(S));
+    ExitOnErr(loadObjects(*S));
   }
 
   JITEvaluatedSymbol EntryPoint = 0;
   {
     TimeRegion TR(Timers ? &Timers->LinkTimer : nullptr);
-    EntryPoint = ExitOnErr(getMainEntryPoint(S));
+    EntryPoint = ExitOnErr(getMainEntryPoint(*S));
   }
 
   if (ShowAddrs)
-    S.dumpSessionInfo(outs());
+    S->dumpSessionInfo(outs());
 
-  ExitOnErr(runChecks(S));
+  ExitOnErr(runChecks(*S));
 
-  dumpSessionStats(S);
+  dumpSessionStats(*S);
 
   if (NoExec)
     return 0;
 
   int Result = 0;
   {
+    using MainTy = int (*)(int, char *[]);
+    auto EntryFn = jitTargetAddressToFunction<MainTy>(EntryPoint.getAddress());
     TimeRegion TR(Timers ? &Timers->RunTimer : nullptr);
-    Result = ExitOnErr(runEntryPoint(S, EntryPoint));
+    Result = runAsMain(EntryFn, InputArgv, StringRef(InputFiles.front()));
   }
 
   return Result;

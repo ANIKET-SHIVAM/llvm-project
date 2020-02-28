@@ -64,6 +64,9 @@ enum class ARMVFPArgKind { Default, Base, VFP, ToolChain };
 // For -z noseparate-code, -z separate-code and -z separate-loadable-segments.
 enum class SeparateSegmentKind { None, Code, Loadable };
 
+// For -z *stack
+enum class GnuStackKind { None, Exec, NoExec };
+
 struct SymbolVersion {
   llvm::StringRef name;
   bool isExternCpp;
@@ -149,9 +152,7 @@ struct Configuration {
   bool exportDynamic;
   bool fixCortexA53Errata843419;
   bool fixCortexA8;
-  bool forceBTI;
   bool formatBinary = false;
-  bool requireCET;
   bool gcSections;
   bool gdbIndex;
   bool gnuHash = false;
@@ -163,15 +164,17 @@ struct Configuration {
   bool ltoCSProfileGenerate;
   bool ltoDebugPassManager;
   bool ltoNewPassManager;
+  bool ltoWholeProgramVisibility;
   bool mergeArmExidx;
   bool mipsN32Abi = false;
+  bool mmapOutputFile;
   bool nmagic;
+  bool noDynamicLinker = false;
   bool noinhibitExec;
   bool nostdlib;
   bool oFormatBinary;
   bool omagic;
   bool optRemarksWithHotness;
-  bool pacPlt;
   bool picThunk;
   bool pie;
   bool printGcSections;
@@ -179,6 +182,7 @@ struct Configuration {
   bool relocatable;
   bool relrPackDynRelocs;
   bool saveTemps;
+  llvm::Optional<uint32_t> shuffleSectionSeed;
   bool singleRoRx;
   bool shared;
   bool isStatic = false;
@@ -187,6 +191,7 @@ struct Configuration {
   bool trace;
   bool thinLTOEmitImportsFiles;
   bool thinLTOIndexOnly;
+  bool timeTraceEnabled;
   bool tocOptimize;
   bool undefinedVersion;
   bool useAndroidRelrTags = false;
@@ -198,7 +203,8 @@ struct Configuration {
   bool writeAddends;
   bool zCombreloc;
   bool zCopyreloc;
-  bool zExecstack;
+  bool zForceBti;
+  bool zForceIbt;
   bool zGlobal;
   bool zHazardplt;
   bool zIfuncNoplt;
@@ -210,12 +216,15 @@ struct Configuration {
   bool zNodlopen;
   bool zNow;
   bool zOrigin;
+  bool zPacPlt;
   bool zRelro;
   bool zRodynamic;
+  bool zShstk;
   bool zText;
   bool zRetpolineplt;
   bool zWxneeded;
   DiscardPolicy discard;
+  GnuStackKind zGnustack;
   ICFLevel icf;
   OrphanHandlingPolicy orphanHandling;
   SortSectionPolicy sortSection;
@@ -236,6 +245,7 @@ struct Configuration {
   unsigned ltoo;
   unsigned optimize;
   unsigned thinLTOJobs;
+  unsigned timeTraceGranularity;
   int32_t splitStackAdjustSize;
 
   // The following config options do not directly correspond to any

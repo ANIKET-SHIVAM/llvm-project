@@ -229,8 +229,9 @@ ParsedAST::build(std::unique_ptr<clang::CompilerInvocation> CI,
       Preamble ? &Preamble->Preamble : nullptr;
 
   StoreDiags ASTDiags;
-  std::string Content = Buffer->getBuffer();
-  std::string Filename = Buffer->getBufferIdentifier(); // Absolute.
+  std::string Content = std::string(Buffer->getBuffer());
+  std::string Filename =
+      std::string(Buffer->getBufferIdentifier()); // Absolute.
 
   auto Clang = prepareCompilerInstance(std::move(CI), PreamblePCH,
                                        std::move(Buffer), VFS, ASTDiags);
@@ -284,12 +285,12 @@ ParsedAST::build(std::unique_ptr<clang::CompilerInvocation> CI,
           // Check for suppression comment. Skip the check for diagnostics not
           // in the main file, because we don't want that function to query the
           // source buffer for preamble files. For the same reason, we ask
-          // ShouldSuppressDiagnostic not to follow macro expansions, since
+          // shouldSuppressDiagnostic not to follow macro expansions, since
           // those might take us into a preamble file as well.
           bool IsInsideMainFile =
               Info.hasSourceManager() &&
               isInsideMainFile(Info.getLocation(), Info.getSourceManager());
-          if (IsInsideMainFile && tidy::ShouldSuppressDiagnostic(
+          if (IsInsideMainFile && tidy::shouldSuppressDiagnostic(
                                       DiagLevel, Info, *CTContext,
                                       /* CheckMacroExpansion = */ false)) {
             return DiagnosticsEngine::Ignored;
@@ -300,6 +301,8 @@ ParsedAST::build(std::unique_ptr<clang::CompilerInvocation> CI,
     });
     Preprocessor *PP = &Clang->getPreprocessor();
     for (const auto &Check : CTChecks) {
+      if (!Check->isLanguageVersionSupported(CTContext->getLangOpts()))
+        continue;
       // FIXME: the PP callbacks skip the entire preamble.
       // Checks that want to see #includes in the main file do not see them.
       Check->registerPPCallbacks(Clang->getSourceManager(), PP, PP);

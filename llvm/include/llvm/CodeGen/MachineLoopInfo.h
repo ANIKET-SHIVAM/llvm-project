@@ -67,6 +67,10 @@ public:
   /// it returns an unknown location.
   DebugLoc getStartLoc() const;
 
+  /// Returns true if a machine loop has blocks that have static profiling
+  /// information---e.g. from '__builtin_expect()'.
+  bool hasStaticProfInfo() const;
+
   void dump() const;
 
 private:
@@ -89,9 +93,7 @@ class MachineLoopInfo : public MachineFunctionPass {
 public:
   static char ID; // Pass identification, replacement for typeid
 
-  MachineLoopInfo() : MachineFunctionPass(ID) {
-    initializeMachineLoopInfoPass(*PassRegistry::getPassRegistry());
-  }
+  MachineLoopInfo();
   explicit MachineLoopInfo(MachineDominatorTree &MDT)
       : MachineFunctionPass(ID) {
     calculate(MDT);

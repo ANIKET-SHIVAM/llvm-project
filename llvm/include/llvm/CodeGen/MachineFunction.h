@@ -20,6 +20,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/FloatingPointMode.h"
 #include "llvm/ADT/GraphTraits.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallVector.h"
@@ -36,7 +37,6 @@
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Recycler.h"
-#include "llvm/Target/TargetMachine.h"
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -72,6 +72,7 @@ class TargetRegisterClass;
 class TargetSubtargetInfo;
 struct WasmEHFuncInfo;
 struct WinEHFuncInfo;
+class GISelChangeObserver;
 
 template <> struct ilist_alloc_traits<MachineBasicBlock> {
   void deleteNode(MachineBasicBlock *MBB);
@@ -396,6 +397,7 @@ public:
 
 private:
   Delegate *TheDelegate = nullptr;
+  GISelChangeObserver *Observer = nullptr;
 
   using CallSiteInfoMap = DenseMap<const MachineInstr *, CallSiteInfo>;
   /// Map a call instruction to call site arguments forwarding info.
@@ -403,14 +405,7 @@ private:
 
   /// A helper function that returns call site info for a give call
   /// instruction if debug entry value support is enabled.
-  CallSiteInfoMap::iterator getCallSiteInfo(const MachineInstr *MI) {
-    assert(MI->isCall() &&
-           "Call site info refers only to call instructions!");
-
-    if (!Target.Options.EnableDebugEntryValues)
-      return CallSitesInfo.end();
-    return CallSitesInfo.find(MI);
-  }
+  CallSiteInfoMap::iterator getCallSiteInfo(const MachineInstr *MI);
 
   // Callbacks for insertion and removal.
   void handleInsertion(MachineInstr &MI);
@@ -450,6 +445,10 @@ public:
 
     TheDelegate = delegate;
   }
+
+  void setObserver(GISelChangeObserver *O) { Observer = O; }
+
+  GISelChangeObserver *getObserver() const { return Observer; }
 
   MachineModuleInfo &getMMI() const { return MMI; }
   MCContext &getContext() const { return Ctx; }
@@ -560,6 +559,9 @@ public:
   }
   void setHasWinCFI(bool v) { HasWinCFI = v; }
 
+  /// True if this function needs frame moves for debug or exceptions.
+  bool needsFrameMoves() const;
+
   /// Get the function properties
   const MachineFunctionProperties &getProperties() const { return Properties; }
   MachineFunctionProperties &getProperties() { return Properties; }
@@ -578,6 +580,10 @@ public:
   const Ty *getInfo() const {
      return const_cast<MachineFunction*>(this)->getInfo<Ty>();
   }
+
+  /// Returns the denormal handling type for the default rounding mode of the
+  /// function.
+  DenormalMode getDenormalMode(const fltSemantics &FPType) const;
 
   /// getBlockNumbered - MachineBasicBlocks are automatically numbered when they
   /// are inserted into the machine function.  The block number for a machine
@@ -796,6 +802,8 @@ public:
   /// Allocate and initialize a register mask with @p NumRegister bits.
   uint32_t *allocateRegMask();
 
+  ArrayRef<int> allocateShuffleMask(ArrayRef<int> Mask);
+
   /// Allocate and construct an extra info structure for a `MachineInstr`.
   ///
   /// This is allocated on the function's allocator and so lives the life of
@@ -981,10 +989,14 @@ public:
     return VariableDbgInfos;
   }
 
+  /// Start tracking the arguments passed to the call \p CallI.
   void addCallArgsForwardingRegs(const MachineInstr *CallI,
                                  CallSiteInfoImpl &&CallInfo) {
-    assert(CallI->isCall());
-    CallSitesInfo[CallI] = std::move(CallInfo);
+    assert(CallI->isCandidateForCallSiteEntry());
+    bool Inserted =
+        CallSitesInfo.try_emplace(CallI, std::move(CallInfo)).second;
+    (void)Inserted;
+    assert(Inserted && "Call site info not unique");
   }
 
   const CallSiteInfoMap &getCallSitesInfo() const {
@@ -994,20 +1006,18 @@ public:
   /// Following functions update call site info. They should be called before
   /// removing, replacing or copying call instruction.
 
-  /// Move the call site info from \p Old to \New call site info. This function
-  /// is used when we are replacing one call instruction with another one to
-  /// the same callee.
-  void moveCallSiteInfo(const MachineInstr *Old,
-                        const MachineInstr *New);
-
   /// Erase the call site info for \p MI. It is used to remove a call
   /// instruction from the instruction stream.
   void eraseCallSiteInfo(const MachineInstr *MI);
-
   /// Copy the call site info from \p Old to \ New. Its usage is when we are
   /// making a copy of the instruction that will be inserted at different point
   /// of the instruction stream.
   void copyCallSiteInfo(const MachineInstr *Old,
+                        const MachineInstr *New);
+  /// Move the call site info from \p Old to \New call site info. This function
+  /// is used when we are replacing one call instruction with another one to
+  /// the same callee.
+  void moveCallSiteInfo(const MachineInstr *Old,
                         const MachineInstr *New);
 };
 

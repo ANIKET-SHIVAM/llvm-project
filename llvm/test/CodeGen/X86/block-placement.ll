@@ -358,11 +358,11 @@ define void @unnatural_cfg2(i32* %p0, i32 %a0) {
 ; CHECK: %loop.header
 ; CHECK: %loop.body1
 ; CHECK: %loop.body2
+; CHECK: %loop.body3
+; CHECK: %loop.inner1.begin
 ; CHECK: %loop.body4
 ; CHECK: %loop.inner2.begin
 ; CHECK: %loop.inner2.begin
-; CHECK: %loop.body3
-; CHECK: %loop.inner1.begin
 ; CHECK: %bail
 
 entry:
@@ -1502,9 +1502,9 @@ define i32 @not_rotate_if_extra_branch(i32 %count) {
 ; CHECK: %.header
 ; CHECK: %.middle
 ; CHECK: %.backedge
-; CHECK: %.slow
 ; CHECK: %.bailout
 ; CHECK: %.stop
+; CHECK: %.slow
 .entry:
   %sum.0 = shl nsw i32 %count, 1
   br label %.header

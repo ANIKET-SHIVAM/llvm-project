@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ExpressionVariable_h_
-#define liblldb_ExpressionVariable_h_
+#ifndef LLDB_EXPRESSION_EXPRESSIONVARIABLE_H
+#define LLDB_EXPRESSION_EXPRESSIONVARIABLE_H
 
 #include <memory>
 #include <vector>
@@ -98,9 +98,7 @@ public:
     EVTypeIsReference = 1 << 6, ///< The original type of this variable is a
                                 ///reference, so materialize the value rather
                                 ///than the location
-    EVUnknownType = 1 << 7, ///< This is a symbol of unknown type, and the type
-                            ///must be resolved after parsing is complete
-    EVBareRegister = 1 << 8 ///< This variable is a direct reference to $pc or
+    EVBareRegister = 1 << 7 ///< This variable is a direct reference to $pc or
                             ///some other entity.
   };
 
@@ -253,4 +251,4 @@ private:
 
 } // namespace lldb_private
 
-#endif // liblldb_ExpressionVariable_h_
+#endif // LLDB_EXPRESSION_EXPRESSIONVARIABLE_H

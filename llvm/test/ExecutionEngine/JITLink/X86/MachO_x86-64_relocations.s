@@ -1,8 +1,15 @@
 # RUN: rm -rf %t && mkdir -p %t
 # RUN: llvm-mc -triple=x86_64-apple-macosx10.9 -filetype=obj -o %t/macho_reloc.o %s
-# RUN: llvm-jitlink -noexec -define-abs external_data=0xdeadbeef -define-abs external_func=0xcafef00d -check=%s %t/macho_reloc.o
+# RUN: llvm-jitlink -noexec -define-abs external_data=0xffffffffdeadbeef \
+# RUN:    -define-abs external_func=0xffffffffcafef00d \
+# RUN:    -define-abs lowaddr_symbol=0x1000 -check=%s %t/macho_reloc.o
 
         .section        __TEXT,__text,regular,pure_instructions
+
+# Check that common symbols work.
+# jitlink-check: *{4}common_symbol = 0
+# jitlink-check: common_symbol[1:0] = 0
+.comm   common_symbol,4,2
 
         .align  4, 0x90
 Lanon_func:
@@ -38,6 +45,17 @@ _main:
         .align  4, 0x90
 test_gotld:
         movq    external_data@GOTPCREL(%rip), %rax
+        retq
+
+
+# Check X86_64_RELOC_GOTPCREL handling with cmp instructions, which have
+# negative addends.
+#
+# jitlink-check: decode_operand(test_gotcmpq, 3) = got_addr(macho_reloc.o, external_data) - next_pc(test_gotcmpq)
+        .globl  test_gotcmpq
+        .align  4, 0x90
+test_gotcmpq:
+        cmpq    $0, external_data@GOTPCREL(%rip)
         retq
 
 # Check that calls to external functions trigger the generation of stubs and GOT
@@ -118,16 +136,16 @@ Lanon_data:
 # anonymous.
 #
 # Note: +8 offset in expression below to accounts for sizeof(Lanon_data).
-# jitlink-check: *{8}(section_addr(macho_reloc.o, __data) + 8) = (section_addr(macho_reloc.o, __data) + 8) - named_data + 2
+# jitlink-check: *{8}(section_addr(macho_reloc.o, __data) + 8) = (section_addr(macho_reloc.o, __data) + 8) - named_data - 2
         .p2align  3
 Lanon_minuend_quad:
-        .quad Lanon_minuend_quad - named_data + 2
+        .quad Lanon_minuend_quad - named_data - 2
 
 # Note: +16 offset in expression below to accounts for sizeof(Lanon_data) + sizeof(Lanon_minuend_long).
-# jitlink-check: *{4}(section_addr(macho_reloc.o, __data) + 16) = ((section_addr(macho_reloc.o, __data) + 16) - named_data + 2)[31:0]
+# jitlink-check: *{4}(section_addr(macho_reloc.o, __data) + 16) = ((section_addr(macho_reloc.o, __data) + 16) - named_data - 2)[31:0]
         .p2align  2
 Lanon_minuend_long:
-        .long Lanon_minuend_long - named_data + 2
+        .long Lanon_minuend_long - named_data - 2
 
 # Named quad storage target (first named atom in __data).
         .globl named_data
@@ -154,11 +172,11 @@ named_func_addr_quad:
 # Check X86_64_RELOC_UNSIGNED / long / extern handling by putting the address of
 # an external function (defined to reside in the low 4Gb) into a long symbol.
 #
-# jitlink-check: *{4}named_func_addr_long = external_func
-        .globl  named_func_addr_long
+# jitlink-check: *{4}named_lowaddr_symbol_long = lowaddr_symbol
+        .globl  named_lowaddr_symbol_long
         .p2align  2
-named_func_addr_long:
-        .long   external_func
+named_lowaddr_symbol_long:
+        .long   lowaddr_symbol
 
 # Check X86_64_RELOC_UNSIGNED / quad / non-extern handling by putting the
 # address of a local anonymous function into a quad symbol.
@@ -221,11 +239,11 @@ minuend_long3:
 # (i.e. is part of an alt_entry chain that includes 'A').
 #
 # Check "A: .long B - C + D" where 'B' is an alt_entry for 'A'.
-# jitlink-check: *{4}subtractor_with_alt_entry_minuend_long = (subtractor_with_alt_entry_minuend_long_B - named_data + 2)[31:0]
+# jitlink-check: *{4}subtractor_with_alt_entry_minuend_long = (subtractor_with_alt_entry_minuend_long_B - named_data - 2)[31:0]
         .globl  subtractor_with_alt_entry_minuend_long
         .p2align  2
 subtractor_with_alt_entry_minuend_long:
-        .long subtractor_with_alt_entry_minuend_long_B - named_data + 2
+        .long subtractor_with_alt_entry_minuend_long_B - named_data - 2
 
         .globl  subtractor_with_alt_entry_minuend_long_B
         .p2align  2
@@ -234,11 +252,11 @@ subtractor_with_alt_entry_minuend_long_B:
         .long 0
 
 # Check "A: .quad B - C + D" where 'B' is an alt_entry for 'A'.
-# jitlink-check: *{8}subtractor_with_alt_entry_minuend_quad = (subtractor_with_alt_entry_minuend_quad_B - named_data + 2)
+# jitlink-check: *{8}subtractor_with_alt_entry_minuend_quad = (subtractor_with_alt_entry_minuend_quad_B - named_data - 2)
         .globl  subtractor_with_alt_entry_minuend_quad
         .p2align  3
 subtractor_with_alt_entry_minuend_quad:
-        .quad subtractor_with_alt_entry_minuend_quad_B - named_data + 2
+        .quad subtractor_with_alt_entry_minuend_quad_B - named_data - 2
 
         .globl  subtractor_with_alt_entry_minuend_quad_B
         .p2align  3
@@ -247,11 +265,11 @@ subtractor_with_alt_entry_minuend_quad_B:
         .quad 0
 
 # Check "A: .long B - C + D" where 'C' is an alt_entry for 'A'.
-# jitlink-check: *{4}subtractor_with_alt_entry_subtrahend_long = (named_data - subtractor_with_alt_entry_subtrahend_long_B + 2)[31:0]
+# jitlink-check: *{4}subtractor_with_alt_entry_subtrahend_long = (named_data - subtractor_with_alt_entry_subtrahend_long_B - 2)[31:0]
         .globl  subtractor_with_alt_entry_subtrahend_long
         .p2align  2
 subtractor_with_alt_entry_subtrahend_long:
-        .long named_data - subtractor_with_alt_entry_subtrahend_long_B + 2
+        .long named_data - subtractor_with_alt_entry_subtrahend_long_B - 2
 
         .globl  subtractor_with_alt_entry_subtrahend_long_B
         .p2align  2
@@ -260,11 +278,11 @@ subtractor_with_alt_entry_subtrahend_long_B:
         .long 0
 
 # Check "A: .quad B - C + D" where 'B' is an alt_entry for 'A'.
-# jitlink-check: *{8}subtractor_with_alt_entry_subtrahend_quad = (named_data - subtractor_with_alt_entry_subtrahend_quad_B + 2)
+# jitlink-check: *{8}subtractor_with_alt_entry_subtrahend_quad = (named_data - subtractor_with_alt_entry_subtrahend_quad_B - 2)
         .globl  subtractor_with_alt_entry_subtrahend_quad
         .p2align  3
 subtractor_with_alt_entry_subtrahend_quad:
-        .quad named_data - subtractor_with_alt_entry_subtrahend_quad_B + 2
+        .quad named_data - subtractor_with_alt_entry_subtrahend_quad_B - 2
 
         .globl  subtractor_with_alt_entry_subtrahend_quad_B
         .p2align  3

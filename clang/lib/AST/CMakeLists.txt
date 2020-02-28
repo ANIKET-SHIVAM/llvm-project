@@ -1,6 +1,7 @@
 set(LLVM_LINK_COMPONENTS
   BinaryFormat
   Core
+  FrontendOpenMP
   Support
   )
 
@@ -14,6 +15,7 @@ clang_tablegen(Opcodes.inc
 
 add_clang_library(clangAST
   APValue.cpp
+  ASTConcept.cpp
   ASTConsumer.cpp
   ASTContext.cpp
   ASTDiagnostic.cpp
@@ -42,8 +44,10 @@ add_clang_library(clangAST
   DeclOpenMP.cpp
   DeclPrinter.cpp
   DeclTemplate.cpp
+  ParentMapContext.cpp
   Expr.cpp
   ExprClassification.cpp
+  ExprConcepts.cpp
   ExprConstant.cpp
   ExprCXX.cpp
   ExprObjC.cpp
@@ -51,7 +55,6 @@ add_clang_library(clangAST
   ExternalASTSource.cpp
   FormatString.cpp
   InheritViz.cpp
-  Interp/Block.cpp
   Interp/ByteCodeEmitter.cpp
   Interp/ByteCodeExprGen.cpp
   Interp/ByteCodeGenError.cpp
@@ -63,6 +66,7 @@ add_clang_library(clangAST
   Interp/Frame.cpp
   Interp/Function.cpp
   Interp/Interp.cpp
+  Interp/InterpBlock.cpp
   Interp/InterpFrame.cpp
   Interp/InterpStack.cpp
   Interp/InterpState.cpp

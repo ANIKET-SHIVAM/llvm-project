@@ -1,4 +1,4 @@
-//===-- Disassembler.cpp ----------------------------------------*- C++ -*-===//
+//===-- Disassembler.cpp --------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -173,8 +173,8 @@ bool Disassembler::Disassemble(
   // Find functions matching the given name.
   SymbolContextList sc_list;
   if (module) {
-    module->FindFunctions(name, nullptr, eFunctionNameTypeAuto, include_symbols,
-                          include_inlines, sc_list);
+    module->FindFunctions(name, CompilerDeclContext(), eFunctionNameTypeAuto,
+                          include_symbols, include_inlines, sc_list);
   } else if (exe_ctx.GetTargetPtr()) {
     exe_ctx.GetTargetPtr()->GetImages().FindFunctions(
         name, eFunctionNameTypeAuto, include_symbols, include_inlines, sc_list);
@@ -1101,15 +1101,22 @@ void InstructionList::Append(lldb::InstructionSP &inst_sp) {
 uint32_t
 InstructionList::GetIndexOfNextBranchInstruction(uint32_t start,
                                                  Target &target,
-                                                 bool ignore_calls) const {
+                                                 bool ignore_calls,
+                                                 bool *found_calls) const {
   size_t num_instructions = m_instructions.size();
 
   uint32_t next_branch = UINT32_MAX;
   size_t i;
+  
+  if (found_calls)
+    *found_calls = false;
   for (i = start; i < num_instructions; i++) {
     if (m_instructions[i]->DoesBranch()) {
-      if (ignore_calls && m_instructions[i]->IsCall())
+      if (ignore_calls && m_instructions[i]->IsCall()) {
+        if (found_calls)
+          *found_calls = true;
         continue;
+      }
       next_branch = i;
       break;
     }
@@ -1339,7 +1346,7 @@ void PseudoInstruction::SetOpcode(size_t opcode_size, void *opcode_data) {
 }
 
 void PseudoInstruction::SetDescription(llvm::StringRef description) {
-  m_description = description;
+  m_description = std::string(description);
 }
 
 Instruction::Operand Instruction::Operand::BuildRegister(ConstString &r) {

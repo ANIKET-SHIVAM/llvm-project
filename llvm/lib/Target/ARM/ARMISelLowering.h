@@ -84,7 +84,9 @@ class VectorType;
       CMN,          // ARM CMN instructions.
       CMPZ,         // ARM compare that sets only Z flag.
       CMPFP,        // ARM VFP compare instruction, sets FPSCR.
+      CMPFPE,       // ARM VFP signalling compare instruction, sets FPSCR.
       CMPFPw0,      // ARM VFP compare against zero instruction, sets FPSCR.
+      CMPFPEw0,     // ARM VFP signalling compare against zero instruction, sets FPSCR.
       FMSTAT,       // ARM fmstat instruction.
 
       CMOV,         // ARM conditional move instructions.
@@ -131,6 +133,7 @@ class VectorType;
       LE,           // Low-overhead loops, Loop End
 
       PREDICATE_CAST, // Predicate cast for MVE i1 types
+      VECTOR_REG_CAST, // Reinterpret the current contents of a vector register
 
       VCMP,         // Vector compare.
       VCMPZ,        // Vector compare to zero.
@@ -202,6 +205,20 @@ class VectorType;
       // Vector multiply long:
       VMULLs,       // ...signed
       VMULLu,       // ...unsigned
+
+      // MVE reductions
+      VADDVs,
+      VADDVu,
+      VADDLVs,
+      VADDLVu,
+      VADDLVAs,
+      VADDLVAu,
+      VMLAVs,
+      VMLAVu,
+      VMLALVs,
+      VMLALVu,
+      VMLALVAs,
+      VMLALVAu,
 
       SMULWB,       // Signed multiply word by half word, bottom
       SMULWT,       // Signed multiply word by half word, top
@@ -343,10 +360,7 @@ class VectorType;
                                         MachineMemOperand::Flags Flags,
                                         bool *Fast) const override;
 
-    EVT getOptimalMemOpType(uint64_t Size,
-                            unsigned DstAlign, unsigned SrcAlign,
-                            bool IsMemset, bool ZeroMemset,
-                            bool MemcpyStrSrc,
+    EVT getOptimalMemOpType(const MemOp &Op,
                             const AttributeList &FuncAttributes) const override;
 
     bool isTruncateFree(Type *SrcTy, Type *DstTy) const override;
@@ -377,7 +391,7 @@ class VectorType;
 
     bool isLegalT2ScaledAddressingMode(const AddrMode &AM, EVT VT) const;
 
-    /// Returns true if the addresing mode representing by AM is legal
+    /// Returns true if the addressing mode representing by AM is legal
     /// for the Thumb1 target, for a load/store of the specified type.
     bool isLegalT1ScaledAddressingMode(const AddrMode &AM, EVT VT) const;
 
@@ -520,6 +534,12 @@ class VectorType;
     bool isExtractSubvectorCheap(EVT ResVT, EVT SrcVT,
                                  unsigned Index) const override;
 
+    bool shouldFormOverflowOp(unsigned Opcode, EVT VT,
+                              bool MathUsed) const override {
+      // Using overflow ops for overflow checks only should beneficial on ARM.
+      return TargetLowering::shouldFormOverflowOp(Opcode, VT, true);
+    }
+
     /// Returns true if an argument of type Ty needs to be passed in a
     /// contiguous block of registers in calling convention CallConv.
     bool functionArgumentNeedsConsecutiveRegisters(
@@ -604,7 +624,7 @@ class VectorType;
     /// Returns true if \p VecTy is a legal interleaved access type. This
     /// function checks the vector element type and the overall width of the
     /// vector.
-    bool isLegalInterleavedAccessType(VectorType *VecTy,
+    bool isLegalInterleavedAccessType(unsigned Factor, VectorType *VecTy,
                                       const DataLayout &DL) const;
 
     bool alignLoopsWithOptSize() const override;
@@ -729,25 +749,18 @@ class VectorType;
     SDValue LowerFP_EXTEND(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFP_TO_INT(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerFSETCC(SDValue Op, SelectionDAG &DAG) const;
     void lowerABS(SDNode *N, SmallVectorImpl<SDValue> &Results,
                   SelectionDAG &DAG) const;
 
-    Register getRegisterByName(const char* RegName, EVT VT,
+    Register getRegisterByName(const char* RegName, LLT VT,
                                const MachineFunction &MF) const override;
 
     SDValue BuildSDIVPow2(SDNode *N, const APInt &Divisor, SelectionDAG &DAG,
                           SmallVectorImpl<SDNode *> &Created) const override;
 
-    /// isFMAFasterThanFMulAndFAdd - Return true if an FMA operation is faster
-    /// than a pair of fmul and fadd instructions. fmuladd intrinsics will be
-    /// expanded to FMAs when this method returns true, otherwise fmuladd is
-    /// expanded to fmul + fadd.
-    ///
-    /// ARM supports both fused and unfused multiply-add operations; we already
-    /// lower a pair of fmul and fadd to the latter so it's not clear that there
-    /// would be a gain or that the gain would be worthwhile enough to risk
-    /// correctness bugs.
-    bool isFMAFasterThanFMulAndFAdd(EVT VT) const override { return false; }
+    bool isFMAFasterThanFMulAndFAdd(const MachineFunction &MF,
+                                    EVT VT) const override;
 
     SDValue ReconstructShuffle(SDValue Op, SelectionDAG &DAG) const;
 
@@ -825,7 +838,7 @@ class VectorType;
     SDValue getARMCmp(SDValue LHS, SDValue RHS, ISD::CondCode CC,
                       SDValue &ARMcc, SelectionDAG &DAG, const SDLoc &dl) const;
     SDValue getVFPCmp(SDValue LHS, SDValue RHS, SelectionDAG &DAG,
-                      const SDLoc &dl) const;
+                      const SDLoc &dl, bool Signaling = false) const;
     SDValue duplicateCmp(SDValue Cmp, SelectionDAG &DAG) const;
 
     SDValue OptimizeVFPBrcond(SDValue Op, SelectionDAG &DAG) const;

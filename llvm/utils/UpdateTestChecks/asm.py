@@ -53,7 +53,8 @@ ASM_FUNCTION_MIPS_RE = re.compile(
     r'^_?(?P<func>[^:]+):[ \t]*#+[ \t]*@(?P=func)\n[^:]*?' # f: (name of func)
     r'(?:^[ \t]+\.(frame|f?mask|set).*?\n)+'  # Mips+LLVM standard asm prologue
     r'(?P<body>.*?)\n'                        # (body of the function)
-    r'(?:^[ \t]+\.(set|end).*?\n)+'           # Mips+LLVM standard asm epilogue
+    # Mips+LLVM standard asm epilogue
+    r'(?:(^[ \t]+\.set[^\n]*?\n)*^[ \t]+\.end.*?\n)'
     r'(\$|\.L)func_end[0-9]+:\n',             # $func_end0: (mips32 - O32) or
                                               # .Lfunc_end0: (mips64 - NewABI)
     flags=(re.M | re.S))
@@ -147,6 +148,12 @@ SCRUB_X86_SHUFFLES_RE = (
     re.compile(
         r'^(\s*\w+) [^#\n]+#+ ((?:[xyz]mm\d+|mem)( \{%k\d+\}( \{z\})?)? = .*)$',
         flags=re.M))
+
+SCRUB_X86_SHUFFLES_NO_MEM_RE = (
+    re.compile(
+        r'^(\s*\w+) [^#\n]+#+ ((?:[xyz]mm\d+|mem)( \{%k\d+\}( \{z\})?)? = (?!.*(?:mem)).*)$',
+        flags=re.M))
+
 SCRUB_X86_SPILL_RELOAD_RE = (
     re.compile(
         r'-?\d+\(%([er])[sb]p\)(.*(?:Spill|Reload))$',
@@ -162,8 +169,13 @@ def scrub_asm_x86(asm, args):
   asm = common.SCRUB_WHITESPACE_RE.sub(r' ', asm)
   # Expand the tabs used for indentation.
   asm = string.expandtabs(asm, 2)
+
   # Detect shuffle asm comments and hide the operands in favor of the comments.
-  asm = SCRUB_X86_SHUFFLES_RE.sub(r'\1 {{.*#+}} \2', asm)
+  if getattr(args, 'no_x86_scrub_mem_shuffle', True):
+    asm = SCRUB_X86_SHUFFLES_NO_MEM_RE.sub(r'\1 {{.*#+}} \2', asm)
+  else:
+    asm = SCRUB_X86_SHUFFLES_RE.sub(r'\1 {{.*#+}} \2', asm)
+
   # Detect stack spills and reloads and hide their exact offset and whether
   # they used the stack pointer or frame pointer.
   asm = SCRUB_X86_SPILL_RELOAD_RE.sub(r'{{[-0-9]+}}(%\1{{[sb]}}p)\2', asm)
@@ -354,11 +366,11 @@ def build_function_body_dictionary_for_triple(args, raw_tool_output, triple, pre
   scrubber, function_re = handler
   common.build_function_body_dictionary(
           function_re, scrubber, [args], raw_tool_output, prefixes,
-          func_dict, args.verbose)
+          func_dict, args.verbose, False)
 
 ##### Generator of assembly CHECK lines
 
 def add_asm_checks(output_lines, comment_marker, prefix_list, func_dict, func_name):
   # Label format is based on ASM string.
-  check_label_format = '{} %s-LABEL: %s:'.format(comment_marker)
+  check_label_format = '{} %s-LABEL: %s%s:'.format(comment_marker)
   common.add_checks(output_lines, comment_marker, prefix_list, func_dict, func_name, check_label_format, True, False)

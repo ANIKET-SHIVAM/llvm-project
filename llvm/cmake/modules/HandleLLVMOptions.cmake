@@ -57,7 +57,10 @@ if( LLVM_ENABLE_ASSERTIONS )
   # On non-Debug builds cmake automatically defines NDEBUG, so we
   # explicitly undefine it:
   if( NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG" )
-    add_definitions( -UNDEBUG )
+    # NOTE: use `add_compile_options` rather than `add_definitions` since
+    # `add_definitions` does not support generator expressions.
+    add_compile_options($<$<OR:$<COMPILE_LANGUAGE:C>,$<COMPILE_LANGUAGE:CXX>>:-UNDEBUG>)
+
     # Also remove /D NDEBUG to avoid MSVC warnings about conflicting defines.
     foreach (flags_var_to_scrub
         CMAKE_CXX_FLAGS_RELEASE
@@ -135,18 +138,37 @@ if(APPLE)
   set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -Wl,-flat_namespace -Wl,-undefined -Wl,suppress")
 endif()
 
-if(${CMAKE_SYSTEM_NAME} MATCHES "AIX")
-  if(NOT LLVM_BUILD_32_BITS)
-    if (CMAKE_CXX_COMPILER_ID MATCHES "XL")
-      append("-q64" CMAKE_CXX_FLAGS CMAKE_C_FLAGS)
-    else()
-      append("-maix64" CMAKE_CXX_FLAGS CMAKE_C_FLAGS)
+if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+  # RHEL7 has ar and ranlib being non-deterministic by default. The D flag forces determinism,
+  # however only GNU version of ar and ranlib (2.27) have this option.
+  # RHEL DTS7 is also affected by this, which uses GNU binutils 2.28
+  execute_process(COMMAND ${CMAKE_AR} rD t.a
+                  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+                  RESULT_VARIABLE AR_RESULT
+                  OUTPUT_QUIET
+                  ERROR_QUIET
+                  )
+  if(${AR_RESULT} EQUAL 0)
+    execute_process(COMMAND ${CMAKE_RANLIB} -D t.a
+                    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+                    RESULT_VARIABLE RANLIB_RESULT
+                    OUTPUT_QUIET
+                    ERROR_QUIET
+                    )
+    if(${RANLIB_RESULT} EQUAL 0)
+      set(CMAKE_C_ARCHIVE_CREATE "<CMAKE_AR> Dqc <TARGET> <LINK_FLAGS> <OBJECTS>")
+      set(CMAKE_C_ARCHIVE_APPEND "<CMAKE_AR> Dq  <TARGET> <LINK_FLAGS> <OBJECTS>")
+      set(CMAKE_C_ARCHIVE_FINISH "<CMAKE_RANLIB> -D <TARGET>")
+
+      set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> Dqc <TARGET> <LINK_FLAGS> <OBJECTS>")
+      set(CMAKE_CXX_ARCHIVE_APPEND "<CMAKE_AR> Dq  <TARGET> <LINK_FLAGS> <OBJECTS>")
+      set(CMAKE_CXX_ARCHIVE_FINISH "<CMAKE_RANLIB> -D <TARGET>")
     endif()
-    set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> -X64 qc <TARGET> <LINK_FLAGS> <OBJECTS>")
-    set(CMAKE_CXX_ARCHIVE_APPEND "<CMAKE_AR> -X64 q  <TARGET> <LINK_FLAGS> <OBJECTS>")
-    set(CMAKE_C_ARCHIVE_FINISH "<CMAKE_RANLIB> -X64 <TARGET>")
-    set(CMAKE_CXX_ARCHIVE_FINISH "<CMAKE_RANLIB> -X64 <TARGET>")
+    file(REMOVE ${CMAKE_BINARY_DIR}/t.a)
   endif()
+endif()
+
+if(${CMAKE_SYSTEM_NAME} MATCHES "AIX")
   # -fPIC does not enable the large code model for GCC on AIX but does for XL.
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     append("-mcmodel=large" CMAKE_CXX_FLAGS CMAKE_C_FLAGS)
@@ -477,7 +499,6 @@ if (MSVC)
       -wd4244 # Suppress ''argument' : conversion from 'type1' to 'type2', possible loss of data'
       -wd4267 # Suppress ''var' : conversion from 'size_t' to 'type', possible loss of data'
       -wd4291 # Suppress ''declaration' : no matching operator delete found; memory will not be freed if initialization throws an exception'
-      -wd4345 # Suppress 'behavior change: an object of POD type constructed with an initializer of the form () will be default-initialized'
       -wd4351 # Suppress 'new behavior: elements of array 'array' will be default initialized'
       -wd4456 # Suppress 'declaration of 'var' hides local variable'
       -wd4457 # Suppress 'declaration of 'var' hides function parameter'
@@ -587,6 +608,16 @@ if (LLVM_ENABLE_WARNINGS AND (LLVM_COMPILER_IS_GCC_COMPATIBLE OR CLANG_CL))
   # LLVM's ADT classes.
   check_cxx_compiler_flag("-Wclass-memaccess" CXX_SUPPORTS_CLASS_MEMACCESS_FLAG)
   append_if(CXX_SUPPORTS_CLASS_MEMACCESS_FLAG "-Wno-class-memaccess" CMAKE_CXX_FLAGS)
+
+  # Disable -Wredundant-move on GCC>=9. GCC wants to remove std::move in code
+  # like "A foo(ConvertibleToA a) { return std::move(a); }", but this code does
+  # not compile (or uses the copy constructor instead) on clang<=3.8. Clang also
+  # has a -Wredundant-move, but it only fires when the types match exactly, so
+  # we can keep it here.
+  if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    check_cxx_compiler_flag("-Wredundant-move" CXX_SUPPORTS_REDUNDANT_MOVE_FLAG)
+    append_if(CXX_SUPPORTS_REDUNDANT_MOVE_FLAG "-Wno-redundant-move" CMAKE_CXX_FLAGS)
+  endif()
 
   # The LLVM libraries have no stable C++ API, so -Wnoexcept-type is not useful.
   check_cxx_compiler_flag("-Wnoexcept-type" CXX_SUPPORTS_NOEXCEPT_TYPE_FLAG)
@@ -744,17 +775,23 @@ endif()
 # Add flags for add_dead_strip().
 # FIXME: With MSVS, consider compiling with /Gy and linking with /OPT:REF?
 # But MinSizeRel seems to add that automatically, so maybe disable these
-# flags instead if LLVM_SUPPORT_PLUGINS is set.
+# flags instead if LLVM_NO_DEAD_STRIP is set.
 if(NOT CYGWIN AND NOT WIN32)
   if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin" AND
      NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
     check_c_compiler_flag("-Werror -fno-function-sections" C_SUPPORTS_FNO_FUNCTION_SECTIONS)
     if (C_SUPPORTS_FNO_FUNCTION_SECTIONS)
-      # Don't add -ffunction-section if it can be disabled with -fno-function-sections.
+      # Don't add -ffunction-sections if it can't be disabled with -fno-function-sections.
       # Doing so will break sanitizers.
       add_flag_if_supported("-ffunction-sections" FFUNCTION_SECTIONS)
+    elseif (CMAKE_CXX_COMPILER_ID MATCHES "XL")
+      append("-qfuncsect" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
     endif()
     add_flag_if_supported("-fdata-sections" FDATA_SECTIONS)
+  endif()
+elseif(MSVC)
+  if( NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG" )
+    append("/Gw" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
   endif()
 endif()
 
@@ -869,6 +906,9 @@ if(uppercase_LLVM_ENABLE_LTO STREQUAL "THIN")
            CMAKE_EXE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS)
   elseif(LLVM_USE_LINKER STREQUAL "gold")
     append("-Wl,--plugin-opt,cache-dir=${PROJECT_BINARY_DIR}/lto.cache"
+           CMAKE_EXE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS)
+  elseif(LINKER_IS_LLD_LINK)
+    append("/lldltocache:${PROJECT_BINARY_DIR}/lto.cache"
            CMAKE_EXE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS)
   endif()
 elseif(uppercase_LLVM_ENABLE_LTO STREQUAL "FULL")

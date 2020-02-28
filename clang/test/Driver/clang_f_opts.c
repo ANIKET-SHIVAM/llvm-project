@@ -85,6 +85,9 @@
 // CHECK-PROFILE-DIR-UNUSED-NOT: "-coverage-data-file" "abc
 // CHECK-PROFILE-DIR-NEITHER-NOT: argument unused
 
+// RUN: %clang_cl -### /c --coverage /Fo/foo/bar.obj -- %s 2>&1 | FileCheck -check-prefix=CHECK-GCNO-LOCATION %s
+// CHECK-GCNO-LOCATION: "-coverage-notes-file" "{{.*}}/foo/bar.gcno"
+
 // RUN: %clang -### -fprofile-arcs -ftest-coverage %s 2>&1 | FileCheck -check-prefix=CHECK-u %s
 // RUN: %clang -### --coverage %s 2>&1 | FileCheck -check-prefix=CHECK-u %s
 // CHECK-u-NOT: "-u{{.*}}"
@@ -198,6 +201,22 @@
 // CHECK-EXTENDED-IDENTIFIERS-NOT: "-fextended-identifiers"
 // CHECK-NO-EXTENDED-IDENTIFIERS: error: unsupported option '-fno-extended-identifiers'
 
+// RUN: %clang -### -S -frounding-math %s 2>&1 | FileCheck -check-prefix=CHECK-ROUNDING-MATH %s
+// CHECK-ROUNDING-MATH: "-cc1"
+// CHECK-ROUNDING-MATH: "-frounding-math"
+// CHECK-ROUNDING-MATH-NOT: "-fno-rounding-math"
+// RUN: %clang -### -S %s 2>&1 | FileCheck -check-prefix=CHECK-ROUNDING-MATH-NOT %s
+// RUN: %clang -### -S -ffp-model=imprecise %s 2>&1 | FileCheck -check-prefix=CHECK-FPMODEL %s
+// CHECK-FPMODEL: unsupported argument 'imprecise' to option 'ffp-model='
+// RUN: %clang -### -S -ffp-model=precise %s 2>&1 | FileCheck -check-prefix=IGNORE %s
+// RUN: %clang -### -S -ffp-model=strict %s 2>&1 | FileCheck -check-prefix=IGNORE %s
+// RUN: %clang -### -S -ffp-model=fast %s 2>&1 | FileCheck -check-prefix=IGNORE %s
+// RUN: %clang -### -S -ffp-exception-behavior=trap %s 2>&1 | FileCheck -check-prefix=CHECK-FPEB %s
+// CHECK-FPEB: unsupported argument 'trap' to option 'ffp-exception-behavior='
+// RUN: %clang -### -S -ffp-exception-behavior=maytrap %s 2>&1 | FileCheck -check-prefix=IGNORE %s
+// RUN: %clang -### -S -ffp-exception-behavior=ignore %s 2>&1 | FileCheck -check-prefix=IGNORE %s
+// RUN: %clang -### -S -ffp-exception-behavior=strict %s 2>&1 | FileCheck -check-prefix=IGNORE %s
+
 // RUN: %clang -### -S -fno-pascal-strings -mpascal-strings %s 2>&1 | FileCheck -check-prefix=CHECK-M-PASCAL-STRINGS %s
 // CHECK-M-PASCAL-STRINGS: "-fpascal-strings"
 
@@ -272,9 +291,6 @@
 // RUN:     -frename-registers                                                \
 // RUN:     -fschedule-insns2                                                 \
 // RUN:     -fsingle-precision-constant                                       \
-// RUN:     -ftree_loop_im                                                    \
-// RUN:     -ftree_loop_ivcanon                                               \
-// RUN:     -ftree_loop_linear                                                \
 // RUN:     -funsafe-loop-optimizations                                       \
 // RUN:     -fuse-linker-plugin                                               \
 // RUN:     -fvect-cost-model                                                 \
@@ -320,7 +336,6 @@
 // RUN: -fprefetch-loop-arrays                                                \
 // RUN: -fprofile-correction                                                  \
 // RUN: -fprofile-values                                                      \
-// RUN: -frounding-math                                                       \
 // RUN: -fschedule-insns                                                      \
 // RUN: -fsignaling-nans                                                      \
 // RUN: -fstrength-reduce                                                     \
@@ -349,9 +364,6 @@
 // RUN: -frename-registers                                                    \
 // RUN: -fschedule-insns2                                                     \
 // RUN: -fsingle-precision-constant                                           \
-// RUN: -ftree_loop_im                                                        \
-// RUN: -ftree_loop_ivcanon                                                   \
-// RUN: -ftree_loop_linear                                                    \
 // RUN: -funsafe-loop-optimizations                                           \
 // RUN: -fuse-linker-plugin                                                   \
 // RUN: -fvect-cost-model                                                     \
@@ -385,7 +397,6 @@
 // CHECK-WARNING-DAG: optimization flag '-fprefetch-loop-arrays' is not supported
 // CHECK-WARNING-DAG: optimization flag '-fprofile-correction' is not supported
 // CHECK-WARNING-DAG: optimization flag '-fprofile-values' is not supported
-// CHECK-WARNING-DAG: optimization flag '-frounding-math' is not supported
 // CHECK-WARNING-DAG: optimization flag '-fschedule-insns' is not supported
 // CHECK-WARNING-DAG: optimization flag '-fsignaling-nans' is not supported
 // CHECK-WARNING-DAG: optimization flag '-fstrength-reduce' is not supported
@@ -414,9 +425,6 @@
 // CHECK-WARNING-DAG: optimization flag '-frename-registers' is not supported
 // CHECK-WARNING-DAG: optimization flag '-fschedule-insns2' is not supported
 // CHECK-WARNING-DAG: optimization flag '-fsingle-precision-constant' is not supported
-// CHECK-WARNING-DAG: optimization flag '-ftree_loop_im' is not supported
-// CHECK-WARNING-DAG: optimization flag '-ftree_loop_ivcanon' is not supported
-// CHECK-WARNING-DAG: optimization flag '-ftree_loop_linear' is not supported
 // CHECK-WARNING-DAG: optimization flag '-funsafe-loop-optimizations' is not supported
 // CHECK-WARNING-DAG: optimization flag '-fuse-linker-plugin' is not supported
 // CHECK-WARNING-DAG: optimization flag '-fvect-cost-model' is not supported
@@ -476,7 +484,7 @@
 // RUN: %clang -target x86_64-unknown-none-none -### -fno-short-wchar -fshort-wchar %s 2>&1 | FileCheck -check-prefix=CHECK-WCHAR2 -check-prefix=DELIMITERS %s
 // Make sure we don't match the -NOT lines with the linker invocation.
 // Delimiters match the start of the cc1 and the start of the linker lines
-// DELIMITERS: {{^ *"}}
+// DELIMITERS: {{^ (\(in-process\)|")}}
 // CHECK-WCHAR1: -fwchar-type=int
 // CHECK-WCHAR1-NOT: -fwchar-type=short
 // CHECK-WCHAR2: -fwchar-type=short
@@ -526,7 +534,9 @@
 // CHECK-NO-CF-PROTECTION-BRANCH-NOT: -fcf-protection=branch
 
 // RUN: %clang -### -S -fdebug-compilation-dir . %s 2>&1 | FileCheck -check-prefix=CHECK-DEBUG-COMPILATION-DIR %s
+// RUN: %clang -### -S -fdebug-compilation-dir=. %s 2>&1 | FileCheck -check-prefix=CHECK-DEBUG-COMPILATION-DIR %s
 // RUN: %clang -### -fdebug-compilation-dir . -x assembler %s 2>&1 | FileCheck -check-prefix=CHECK-DEBUG-COMPILATION-DIR %s
+// RUN: %clang -### -fdebug-compilation-dir=. -x assembler %s 2>&1 | FileCheck -check-prefix=CHECK-DEBUG-COMPILATION-DIR %s
 // CHECK-DEBUG-COMPILATION-DIR: "-fdebug-compilation-dir" "."
 
 // RUN: %clang -### -S -fdiscard-value-names %s 2>&1 | FileCheck -check-prefix=CHECK-DISCARD-NAMES %s
@@ -562,6 +572,11 @@
 // CHECK-RECORD-GCC-SWITCHES: "-record-command-line"
 // CHECK-NO-RECORD-GCC-SWITCHES-NOT: "-record-command-line"
 // CHECK-RECORD-GCC-SWITCHES-ERROR: error: unsupported option '-frecord-command-line' for target
+// Test when clang is in a path containing a space.
+// RUN: mkdir -p "%t.r/with spaces"
+// RUN: cp %clang "%t.r/with spaces/clang"
+// RUN: "%t.r/with spaces/clang" -### -S -target x86_64-unknown-linux -frecord-gcc-switches %s 2>&1 | FileCheck -check-prefix=CHECK-RECORD-GCC-SWITCHES-ESCAPED %s
+// CHECK-RECORD-GCC-SWITCHES-ESCAPED: "-record-command-line" "{{.+}}with\\ spaces{{.+}}"
 
 // RUN: %clang -### -S -ftrivial-auto-var-init=uninitialized %s 2>&1 | FileCheck -check-prefix=CHECK-TRIVIAL-UNINIT %s
 // RUN: %clang -### -S -ftrivial-auto-var-init=pattern %s 2>&1 | FileCheck -check-prefix=CHECK-TRIVIAL-PATTERN %s
@@ -571,3 +586,6 @@
 // CHECK-TRIVIAL-PATTERN-NOT: hasn't been enabled
 // CHECK-TRIVIAL-ZERO-GOOD-NOT: hasn't been enabled
 // CHECK-TRIVIAL-ZERO-BAD: hasn't been enabled
+
+// RUN: %clang -### -S -fno-temp-file %s 2>&1 | FileCheck -check-prefix=CHECK-NO-TEMP-FILE %s
+// CHECK-NO-TEMP-FILE: "-fno-temp-file"

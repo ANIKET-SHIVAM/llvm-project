@@ -336,7 +336,7 @@ define <2 x float> @neg_mul_vec_undef(<2 x float> %x, <2 x float> %y) {
 ; (0.0 - X) * Y
 define float @neg_sink_nsz(float %x, float %y) {
 ; CHECK-LABEL: @neg_sink_nsz(
-; CHECK-NEXT:    [[SUB1:%.*]] = fsub nsz float -0.000000e+00, [[X:%.*]]
+; CHECK-NEXT:    [[SUB1:%.*]] = fneg nsz float [[X:%.*]]
 ; CHECK-NEXT:    [[MUL:%.*]] = fmul float [[SUB1]], [[Y:%.*]]
 ; CHECK-NEXT:    ret float [[MUL]]
 ;
@@ -409,7 +409,7 @@ for.end:                                          ; preds = %for.cond
 ; X * -1.0 => -0.0 - X
 define float @test9(float %x) {
 ; CHECK-LABEL: @test9(
-; CHECK-NEXT:    [[MUL:%.*]] = fsub float -0.000000e+00, [[X:%.*]]
+; CHECK-NEXT:    [[MUL:%.*]] = fneg float [[X:%.*]]
 ; CHECK-NEXT:    ret float [[MUL]]
 ;
   %mul = fmul float %x, -1.0
@@ -419,7 +419,7 @@ define float @test9(float %x) {
 ; PR18532
 define <4 x float> @test10(<4 x float> %x) {
 ; CHECK-LABEL: @test10(
-; CHECK-NEXT:    [[MUL:%.*]] = fsub arcp afn <4 x float> <float -0.000000e+00, float -0.000000e+00, float -0.000000e+00, float -0.000000e+00>, [[X:%.*]]
+; CHECK-NEXT:    [[MUL:%.*]] = fneg arcp afn <4 x float> [[X:%.*]]
 ; CHECK-NEXT:    ret <4 x float> [[MUL]]
 ;
   %mul = fmul arcp afn <4 x float> %x, <float -1.0, float -1.0, float -1.0, float -1.0>
@@ -1073,8 +1073,7 @@ define <2 x double> @negate_if_true_wrong_constant(<2 x double> %px, i1 %cond) {
 ; X *fast (C ? 1.0 : 0.0) -> C ? X : 0.0
 define float @fmul_select(float %x, i1 %c) {
 ; CHECK-LABEL: @fmul_select(
-; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[C:%.*]], float 1.000000e+00, float 0.000000e+00
-; CHECK-NEXT:    [[MUL:%.*]] = fmul fast float [[SEL]], [[X:%.*]]
+; CHECK-NEXT:    [[MUL:%.*]] = select fast i1 [[C:%.*]], float [[X:%.*]], float 0.000000e+00
 ; CHECK-NEXT:    ret float [[MUL]]
 ;
   %sel = select i1 %c, float 1.0, float 0.0
@@ -1085,8 +1084,7 @@ define float @fmul_select(float %x, i1 %c) {
 ; X *fast (C ? 1.0 : 0.0) -> C ? X : 0.0
 define <2 x float> @fmul_select_vec(<2 x float> %x, i1 %c) {
 ; CHECK-LABEL: @fmul_select_vec(
-; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[C:%.*]], <2 x float> <float 1.000000e+00, float 1.000000e+00>, <2 x float> zeroinitializer
-; CHECK-NEXT:    [[MUL:%.*]] = fmul fast <2 x float> [[SEL]], [[X:%.*]]
+; CHECK-NEXT:    [[MUL:%.*]] = select fast i1 [[C:%.*]], <2 x float> [[X:%.*]], <2 x float> zeroinitializer
 ; CHECK-NEXT:    ret <2 x float> [[MUL]]
 ;
   %sel = select i1 %c, <2 x float> <float 1.0, float 1.0>, <2 x float> zeroinitializer
@@ -1110,8 +1108,7 @@ define float @fmul_select_strict(float %x, i1 %c) {
 define double @fmul_sqrt_select(double %x, i1 %c) {
 ; CHECK-LABEL: @fmul_sqrt_select(
 ; CHECK-NEXT:    [[SQR:%.*]] = call double @llvm.sqrt.f64(double [[X:%.*]])
-; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[C:%.*]], double [[SQR]], double 1.000000e+00
-; CHECK-NEXT:    [[MUL:%.*]] = fmul fast double [[SQR]], [[SEL]]
+; CHECK-NEXT:    [[MUL:%.*]] = select fast i1 [[C:%.*]], double [[X]], double [[SQR]]
 ; CHECK-NEXT:    ret double [[MUL]]
 ;
   %sqr = call double @llvm.sqrt.f64(double %x)

@@ -194,10 +194,6 @@ void ClangdServer::addDocument(PathRef File, llvm::StringRef Contents,
 
 void ClangdServer::removeDocument(PathRef File) { WorkScheduler.remove(File); }
 
-llvm::StringRef ClangdServer::getDocument(PathRef File) const {
-  return WorkScheduler.getContents(File);
-}
-
 void ClangdServer::codeComplete(PathRef File, Position Pos,
                                 const clangd::CodeCompleteOptions &Opts,
                                 Callback<CodeCompleteResult> CB) {
@@ -394,14 +390,6 @@ void ClangdServer::rename(PathRef File, Position Pos, llvm::StringRef NewName,
   WorkScheduler.runWithAST("Rename", File, std::move(Action));
 }
 
-void ClangdServer::rename(PathRef File, Position Pos, llvm::StringRef NewName,
-                          bool WantFormat, Callback<FileEdits> CB) {
-  RenameOptions Opts;
-  Opts.WantFormat = WantFormat;
-  Opts.AllowCrossFile = false;
-  rename(File, Pos, NewName, Opts, std::move(CB));
-}
-
 // May generate several candidate selections, due to SelectionTree ambiguity.
 // vector of pointers because GCC doesn't like non-copyable Selection.
 static llvm::Expected<std::vector<std::unique_ptr<Tweak::Selection>>>
@@ -449,7 +437,8 @@ void ClangdServer::enumerateTweaks(PathRef File, Range Sel,
     CB(std::move(Res));
   };
 
-  WorkScheduler.runWithAST("EnumerateTweaks", File, std::move(Action));
+  WorkScheduler.runWithAST("EnumerateTweaks", File, std::move(Action),
+                           TUScheduler::InvalidateOnUpdate);
 }
 
 void ClangdServer::applyTweak(PathRef File, Range Sel, StringRef TweakID,
@@ -568,7 +557,8 @@ void ClangdServer::findDocumentHighlights(
         CB(clangd::findDocumentHighlights(InpAST->AST, Pos));
       };
 
-  WorkScheduler.runWithAST("Highlights", File, std::move(Action));
+  WorkScheduler.runWithAST("Highlights", File, std::move(Action),
+                           TUScheduler::InvalidateOnUpdate);
 }
 
 void ClangdServer::findHover(PathRef File, Position Pos,
@@ -582,7 +572,8 @@ void ClangdServer::findHover(PathRef File, Position Pos,
     CB(clangd::getHover(InpAST->AST, Pos, std::move(Style), Index));
   };
 
-  WorkScheduler.runWithAST("Hover", File, std::move(Action));
+  WorkScheduler.runWithAST("Hover", File, std::move(Action),
+                           TUScheduler::InvalidateOnUpdate);
 }
 
 void ClangdServer::typeHierarchy(PathRef File, Position Pos, int Resolve,
@@ -630,7 +621,8 @@ void ClangdServer::documentSymbols(llvm::StringRef File,
           return CB(InpAST.takeError());
         CB(clangd::getDocumentSymbols(InpAST->AST));
       };
-  WorkScheduler.runWithAST("documentSymbols", File, std::move(Action));
+  WorkScheduler.runWithAST("documentSymbols", File, std::move(Action),
+                           TUScheduler::InvalidateOnUpdate);
 }
 
 void ClangdServer::findReferences(PathRef File, Position Pos, uint32_t Limit,
@@ -676,7 +668,8 @@ void ClangdServer::documentLinks(PathRef File,
           return CB(InpAST.takeError());
         CB(clangd::getDocumentLinks(InpAST->AST));
       };
-  WorkScheduler.runWithAST("DocumentLinks", File, std::move(Action));
+  WorkScheduler.runWithAST("DocumentLinks", File, std::move(Action),
+                           TUScheduler::InvalidateOnUpdate);
 }
 
 std::vector<std::pair<Path, std::size_t>>

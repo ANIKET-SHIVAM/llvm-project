@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Annotations.h"
+#include "Cancellation.h"
 #include "Context.h"
 #include "Diagnostics.h"
 #include "Matchers.h"
@@ -138,9 +139,7 @@ TEST_F(TUSchedulerTests, MissingFiles) {
   auto Missing = testPath("missing.cpp");
   Files[Missing] = "";
 
-  EXPECT_EQ(S.getContents(Added), "");
   S.update(Added, getInputs(Added, "x"), WantDiagnostics::No);
-  EXPECT_EQ(S.getContents(Added), "x");
 
   // Assert each operation for missing file is an error (even if it's
   // available in VFS).
@@ -159,9 +158,7 @@ TEST_F(TUSchedulerTests, MissingFiles) {
                     [&](Expected<InputsAndPreamble> Preamble) {
                       EXPECT_TRUE(bool(Preamble));
                     });
-  EXPECT_EQ(S.getContents(Added), "x");
   S.remove(Added);
-  EXPECT_EQ(S.getContents(Added), "");
 
   // Assert that all operations fail after removing the file.
   S.runWithAST("", Added,
@@ -348,6 +345,63 @@ TEST_F(TUSchedulerTests, Cancellation) {
       << "All reads other than R2B were cancelled";
   EXPECT_THAT(ReadsCanceled, ElementsAre("R1", "R2A", "R3"))
       << "All reads other than R2B were cancelled";
+}
+
+TEST_F(TUSchedulerTests, Invalidation) {
+  auto Path = testPath("foo.cpp");
+  TUScheduler S(CDB, optsForTest(), captureDiags());
+  std::atomic<int> Builds(0), Actions(0);
+
+  Notification Start;
+  updateWithDiags(S, Path, "a", WantDiagnostics::Yes, [&](std::vector<Diag>) {
+    ++Builds;
+    Start.wait();
+  });
+  S.runWithAST(
+      "invalidatable", Path,
+      [&](llvm::Expected<InputsAndAST> AST) {
+        ++Actions;
+        EXPECT_FALSE(bool(AST));
+        llvm::Error E = AST.takeError();
+        EXPECT_TRUE(E.isA<CancelledError>());
+        consumeError(std::move(E));
+      },
+      TUScheduler::InvalidateOnUpdate);
+  S.runWithAST(
+      "not-invalidatable", Path,
+      [&](llvm::Expected<InputsAndAST> AST) {
+        ++Actions;
+        EXPECT_TRUE(bool(AST));
+      },
+      TUScheduler::NoInvalidation);
+  updateWithDiags(S, Path, "b", WantDiagnostics::Auto, [&](std::vector<Diag>) {
+    ++Builds;
+    ADD_FAILURE() << "Shouldn't build, all dependents invalidated";
+  });
+  S.runWithAST(
+      "invalidatable", Path,
+      [&](llvm::Expected<InputsAndAST> AST) {
+        ++Actions;
+        EXPECT_FALSE(bool(AST));
+        llvm::Error E = AST.takeError();
+        EXPECT_TRUE(E.isA<CancelledError>());
+        consumeError(std::move(E));
+      },
+      TUScheduler::InvalidateOnUpdate);
+  updateWithDiags(S, Path, "c", WantDiagnostics::Auto,
+                  [&](std::vector<Diag>) { ++Builds; });
+  S.runWithAST(
+      "invalidatable", Path,
+      [&](llvm::Expected<InputsAndAST> AST) {
+        ++Actions;
+        EXPECT_TRUE(bool(AST)) << "Shouldn't be invalidated, no update follows";
+      },
+      TUScheduler::InvalidateOnUpdate);
+  Start.notify();
+  ASSERT_TRUE(S.blockUntilIdle(timeoutSeconds(10)));
+
+  EXPECT_EQ(2, Builds.load()) << "Middle build should be skipped";
+  EXPECT_EQ(4, Actions.load()) << "All actions should run (some with error)";
 }
 
 TEST_F(TUSchedulerTests, ManyUpdates) {

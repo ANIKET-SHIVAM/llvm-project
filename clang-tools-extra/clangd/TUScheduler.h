@@ -122,7 +122,8 @@ public:
   /// Called on the AST that was built for emitting the preamble. The built AST
   /// contains only AST nodes from the #include directives at the start of the
   /// file. AST node in the current file should be observed on onMainAST call.
-  virtual void onPreambleAST(PathRef Path, ASTContext &Ctx,
+  virtual void onPreambleAST(PathRef Path, llvm::StringRef Version,
+                             ASTContext &Ctx,
                              std::shared_ptr<clang::Preprocessor> PP,
                              const CanonicalIncludes &) {}
 
@@ -153,8 +154,8 @@ public:
 
   /// Called whenever the AST fails to build. \p Diags will have the diagnostics
   /// that led to failure.
-  virtual void onFailedAST(PathRef Path, std::vector<Diag> Diags,
-                           PublishFn Publish) {}
+  virtual void onFailedAST(PathRef Path, llvm::StringRef Version,
+                           std::vector<Diag> Diags, PublishFn Publish) {}
 
   /// Called whenever the TU status is updated.
   virtual void onFileUpdated(PathRef File, const TUStatus &Status) {}
@@ -230,27 +231,14 @@ public:
     InvalidateOnUpdate,
   };
 
-  /// Error to return when an ASTActionInvalidation policy fires.
-  class InvalidatedError : public llvm::ErrorInfo<InvalidatedError> {
-  public:
-    static char ID;
-    ASTActionInvalidation Policy;
-
-    void log(llvm::raw_ostream &OS) const override;
-    std::error_code convertToErrorCode() const override {
-      return std::make_error_code(std::errc::interrupted);
-    }
-  };
-
   /// Schedule an async read of the AST. \p Action will be called when AST is
   /// ready. The AST passed to \p Action refers to the version of \p File
   /// tracked at the time of the call, even if new updates are received before
   /// \p Action is executed.
   /// If an error occurs during processing, it is forwarded to the \p Action
   /// callback.
-  /// If the context is cancelled before the AST is ready, the callback will
-  /// receive a CancelledError. If the invalidation policy is triggered, the
-  /// callback will receive an InvalidatedError.
+  /// If the context is cancelled before the AST is ready, or the invalidation
+  /// policy is triggered, the callback will receive a CancelledError.
   void runWithAST(llvm::StringRef Name, PathRef File,
                   Callback<InputsAndAST> Action,
                   ASTActionInvalidation = NoInvalidation);

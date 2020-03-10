@@ -30,7 +30,7 @@ class TargetMachine;
 namespace legacy {
 class FunctionPassManager;
 class PassManagerBase;
-}
+} // namespace legacy
 
 /// PassManagerBuilder - This class is used to set up a standard optimization
 /// sequence for languages like C and C++, allowing some APIs to customize the
@@ -217,6 +217,8 @@ private:
   void addLateLTOOptimizationPasses(legacy::PassManagerBase &PM);
   void addPGOInstrPasses(legacy::PassManagerBase &MPM, bool IsCS);
   void addFunctionSimplificationPasses(legacy::PassManagerBase &MPM);
+  void addCustomLoopFunctionSimplificationPasses(legacy::PassManagerBase &MPM);
+  void addCustomLoopModulePasses(legacy::PassManagerBase &MPM);
   void addInstructionCombiningPass(legacy::PassManagerBase &MPM) const;
 
 public:
@@ -253,7 +255,7 @@ public:
 };
 
 inline PassManagerBuilder *unwrap(LLVMPassManagerBuilderRef P) {
-    return reinterpret_cast<PassManagerBuilder*>(P);
+  return reinterpret_cast<PassManagerBuilder *>(P);
 }
 
 inline LLVMPassManagerBuilderRef wrap(PassManagerBuilder *P) {

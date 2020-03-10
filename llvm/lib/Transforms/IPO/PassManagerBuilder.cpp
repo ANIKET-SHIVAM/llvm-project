@@ -55,18 +55,16 @@ static cl::opt<bool>
     RunPartialInlining("enable-partial-inlining", cl::init(false), cl::Hidden,
                        cl::ZeroOrMore, cl::desc("Run Partial inlinining pass"));
 
-static cl::opt<bool>
-UseGVNAfterVectorization("use-gvn-after-vectorization",
-  cl::init(false), cl::Hidden,
-  cl::desc("Run GVN instead of Early CSE after vectorization passes"));
+static cl::opt<bool> UseGVNAfterVectorization(
+    "use-gvn-after-vectorization", cl::init(false), cl::Hidden,
+    cl::desc("Run GVN instead of Early CSE after vectorization passes"));
 
 static cl::opt<bool> ExtraVectorizerPasses(
     "extra-vectorizer-passes", cl::init(false), cl::Hidden,
     cl::desc("Run cleanup optimization passes after vectorization."));
 
-static cl::opt<bool>
-RunLoopRerolling("reroll-loops", cl::Hidden,
-                 cl::desc("Run the loop rerolling pass"));
+static cl::opt<bool> RunLoopRerolling("reroll-loops", cl::Hidden,
+                                      cl::desc("Run the loop rerolling pass"));
 
 static cl::opt<bool> RunNewGVN("enable-newgvn", cl::init(false), cl::Hidden,
                                cl::desc("Run the NewGVN pass"));
@@ -101,7 +99,7 @@ static cl::opt<bool>
                          cl::desc("Enable performing ThinLTO."));
 
 cl::opt<bool> EnableHotColdSplit("hot-cold-split", cl::init(false), cl::Hidden,
-    cl::desc("Enable hot-cold splitting pass"));
+                                 cl::desc("Enable hot-cold splitting pass"));
 
 static cl::opt<bool> UseLoopVersioningLICM(
     "enable-loop-versioning-licm", cl::init(false), cl::Hidden,
@@ -116,9 +114,9 @@ static cl::opt<int> PreInlineThreshold(
     cl::desc("Control the amount of inlining in pre-instrumentation inliner "
              "(default = 75)"));
 
-static cl::opt<bool> EnableGVNHoist(
-    "enable-gvn-hoist", cl::init(false), cl::Hidden,
-    cl::desc("Enable the GVN hoisting pass (default = off)"));
+static cl::opt<bool>
+    EnableGVNHoist("enable-gvn-hoist", cl::init(false), cl::Hidden,
+                   cl::desc("Enable the GVN hoisting pass (default = off)"));
 
 static cl::opt<bool>
     DisableLibCallsShrinkWrap("disable-libcalls-shrinkwrap", cl::init(false),
@@ -130,9 +128,9 @@ static cl::opt<bool> EnableSimpleLoopUnswitch(
     cl::desc("Enable the simple loop unswitch pass. Also enables independent "
              "cleanup passes integrated into the loop pass manager pipeline."));
 
-static cl::opt<bool> EnableGVNSink(
-    "enable-gvn-sink", cl::init(false), cl::Hidden,
-    cl::desc("Enable the GVN sinking pass (default = off)"));
+static cl::opt<bool>
+    EnableGVNSink("enable-gvn-sink", cl::init(false), cl::Hidden,
+                  cl::desc("Enable the GVN sinking pass (default = off)"));
 
 // This option is used in simplifying testing SampleFDO optimizations for
 // profile loading.
@@ -154,33 +152,33 @@ static cl::opt<bool>
                  cl::desc("Enable lowering of the matrix intrinsics"));
 
 PassManagerBuilder::PassManagerBuilder() {
-    OptLevel = 2;
-    SizeLevel = 0;
-    LibraryInfo = nullptr;
-    Inliner = nullptr;
-    DisableUnrollLoops = false;
-    SLPVectorize = RunSLPVectorization;
-    LoopVectorize = EnableLoopVectorization;
-    LoopsInterleaved = EnableLoopInterleaving;
-    RerollLoops = RunLoopRerolling;
-    NewGVN = RunNewGVN;
-    LicmMssaOptCap = SetLicmMssaOptCap;
-    LicmMssaNoAccForPromotionCap = SetLicmMssaNoAccForPromotionCap;
-    DisableGVNLoadPRE = false;
-    ForgetAllSCEVInLoopUnroll = ForgetSCEVInLoopUnroll;
-    VerifyInput = false;
-    VerifyOutput = false;
-    MergeFunctions = false;
-    PrepareForLTO = false;
-    EnablePGOInstrGen = false;
-    EnablePGOCSInstrGen = false;
-    EnablePGOCSInstrUse = false;
-    PGOInstrGen = "";
-    PGOInstrUse = "";
-    PGOSampleUse = "";
-    PrepareForThinLTO = EnablePrepareForThinLTO;
-    PerformThinLTO = EnablePerformThinLTO;
-    DivergentTarget = false;
+  OptLevel = 2;
+  SizeLevel = 0;
+  LibraryInfo = nullptr;
+  Inliner = nullptr;
+  DisableUnrollLoops = false;
+  SLPVectorize = RunSLPVectorization;
+  LoopVectorize = EnableLoopVectorization;
+  LoopsInterleaved = EnableLoopInterleaving;
+  RerollLoops = RunLoopRerolling;
+  NewGVN = RunNewGVN;
+  LicmMssaOptCap = SetLicmMssaOptCap;
+  LicmMssaNoAccForPromotionCap = SetLicmMssaNoAccForPromotionCap;
+  DisableGVNLoadPRE = false;
+  ForgetAllSCEVInLoopUnroll = ForgetSCEVInLoopUnroll;
+  VerifyInput = false;
+  VerifyOutput = false;
+  MergeFunctions = false;
+  PrepareForLTO = false;
+  EnablePGOInstrGen = false;
+  EnablePGOCSInstrGen = false;
+  EnablePGOCSInstrUse = false;
+  PGOInstrGen = "";
+  PGOInstrUse = "";
+  PGOSampleUse = "";
+  PrepareForThinLTO = EnablePrepareForThinLTO;
+  PerformThinLTO = EnablePerformThinLTO;
+  DivergentTarget = false;
 }
 
 PassManagerBuilder::~PassManagerBuilder() {
@@ -285,7 +283,8 @@ void PassManagerBuilder::populateFunctionPassManager(
   if (LibraryInfo)
     FPM.add(new TargetLibraryInfoWrapperPass(*LibraryInfo));
 
-  if (OptLevel == 0) return;
+  if (OptLevel == 0)
+    return;
 
   addInitialAliasAnalysisPasses(FPM);
 
@@ -350,9 +349,11 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
     legacy::PassManagerBase &MPM) {
   // Start of function pass.
   // Break up aggregate allocas, using SSAUpdater.
-  assert(OptLevel >= 1 && "Calling function optimizer with no optimization level!");
+  assert(OptLevel >= 1 &&
+         "Calling function optimizer with no optimization level!");
   MPM.add(createSROAPass());
-  MPM.add(createEarlyCSEPass(true /* Enable mem-ssa. */)); // Catch trivial redundancies
+  MPM.add(createEarlyCSEPass(
+      true /* Enable mem-ssa. */)); // Catch trivial redundancies
 
   if (OptLevel > 1) {
     if (EnableGVNHoist)
@@ -364,13 +365,14 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   }
 
   if (OptLevel > 1) {
-    // Speculative execution if the target has divergent branches; otherwise nop.
+    // Speculative execution if the target has divergent branches; otherwise
+    // nop.
     MPM.add(createSpeculativeExecutionIfHasBranchDivergencePass());
 
-    MPM.add(createJumpThreadingPass());         // Thread jumps.
+    MPM.add(createJumpThreadingPass());              // Thread jumps.
     MPM.add(createCorrelatedValuePropagationPass()); // Propagate conditionals
   }
-  MPM.add(createCFGSimplificationPass());     // Merge & remove BBs
+  MPM.add(createCFGSimplificationPass()); // Merge & remove BBs
   // Combine silly seq's
   if (OptLevel > 2)
     MPM.add(createAggressiveInstCombinerPass());
@@ -386,13 +388,94 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   // TODO: Investigate the cost/benefit of tail call elimination on debugging.
   if (OptLevel > 1)
     MPM.add(createTailCallEliminationPass()); // Eliminate tail calls
-  MPM.add(createCFGSimplificationPass());      // Merge & remove BBs
+  MPM.add(createCFGSimplificationPass());     // Merge & remove BBs
   MPM.add(createReassociatePass());           // Reassociate expressions
 
   // Check if custom loop transformation ordering is enabled (-Ocustom).
   if (OptLevel == 9) {
-    //MPM.add(createLoopCustomOptzPass());
+    addCustomLoopFunctionSimplificationPasses(MPM);
+  } else {
+    // Begin the loop pass pipeline.
+    if (EnableSimpleLoopUnswitch) {
+      // The simple loop unswitch pass relies on separate cleanup passes.
+      // Schedule them first so when we re-process a loop they run before other
+      // loop passes.
+      MPM.add(createLoopInstSimplifyPass());
+      MPM.add(createLoopSimplifyCFGPass());
+    }
+    // Rotate Loop - disable header duplication at -Oz
+    MPM.add(createLoopRotatePass(SizeLevel == 2 ? 0 : -1));
+    // TODO: Investigate promotion cap for O1.
+    MPM.add(createLICMPass(LicmMssaOptCap, LicmMssaNoAccForPromotionCap));
+    if (EnableSimpleLoopUnswitch)
+      MPM.add(createSimpleLoopUnswitchLegacyPass());
+    else
+      MPM.add(
+          createLoopUnswitchPass(SizeLevel || OptLevel < 3, DivergentTarget));
+    // FIXME: We break the loop pass pipeline here in order to do full
+    // simplify-cfg. Eventually loop-simplifycfg should be enhanced to replace
+    // the need for this.
+    MPM.add(createCFGSimplificationPass());
+    addInstructionCombiningPass(MPM);
+    // We resume loop passes creating a second loop pipeline here.
+    MPM.add(createIndVarSimplifyPass()); // Canonicalize indvars
+    MPM.add(createLoopIdiomPass());      // Recognize idioms like memset.
+    addExtensionsToPM(EP_LateLoopOptimizations, MPM);
+    MPM.add(createLoopDeletionPass()); // Delete dead loops
+
+    if (EnableLoopInterchange)
+      MPM.add(createLoopInterchangePass()); // Interchange loops
+
+    // Unroll small loops
+    MPM.add(createSimpleLoopUnrollPass(OptLevel, DisableUnrollLoops,
+                                       ForgetAllSCEVInLoopUnroll));
+    addExtensionsToPM(EP_LoopOptimizerEnd, MPM);
+    // This ends the loop pass pipelines.
   }
+
+  if (OptLevel > 1) {
+    MPM.add(createMergedLoadStoreMotionPass()); // Merge ld/st in diamonds
+    MPM.add(NewGVN ? createNewGVNPass()
+                   : createGVNPass(DisableGVNLoadPRE)); // Remove redundancies
+  }
+  MPM.add(createMemCpyOptPass()); // Remove memcpy / form memset
+  MPM.add(createSCCPPass());      // Constant prop with SCCP
+
+  // Delete dead bit computations (instcombine runs after to fold away the dead
+  // computations, and then ADCE will run later to exploit any new DCE
+  // opportunities that creates).
+  MPM.add(createBitTrackingDCEPass()); // Delete dead bit computations
+
+  // Run instcombine after redundancy elimination to exploit opportunities
+  // opened up by them.
+  addInstructionCombiningPass(MPM);
+  addExtensionsToPM(EP_Peephole, MPM);
+  if (OptLevel > 1) {
+    MPM.add(createJumpThreadingPass()); // Thread jumps
+    MPM.add(createCorrelatedValuePropagationPass());
+    MPM.add(createDeadStoreEliminationPass()); // Delete dead stores
+    MPM.add(createLICMPass(LicmMssaOptCap, LicmMssaNoAccForPromotionCap));
+  }
+
+  addExtensionsToPM(EP_ScalarOptimizerLate, MPM);
+
+  if (RerollLoops)
+    MPM.add(createLoopRerollPass());
+
+  // TODO: Investigate if this is too expensive at O1.
+  MPM.add(createAggressiveDCEPass());     // Delete dead instructions
+  MPM.add(createCFGSimplificationPass()); // Merge & remove BBs
+  // Clean up after everything.
+  addInstructionCombiningPass(MPM);
+  addExtensionsToPM(EP_Peephole, MPM);
+
+  if (EnableCHR && OptLevel >= 3 &&
+      (!PGOInstrUse.empty() || !PGOSampleUse.empty() || EnablePGOCSInstrGen))
+    MPM.add(createControlHeightReductionLegacyPass());
+}
+
+void PassManagerBuilder::addCustomLoopFunctionSimplificationPasses(
+    legacy::PassManagerBase &MPM) {
   // Begin the loop pass pipeline.
   if (EnableSimpleLoopUnswitch) {
     // The simple loop unswitch pass relies on separate cleanup passes. Schedule
@@ -415,10 +498,10 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   MPM.add(createCFGSimplificationPass());
   addInstructionCombiningPass(MPM);
   // We resume loop passes creating a second loop pipeline here.
-  MPM.add(createIndVarSimplifyPass());        // Canonicalize indvars
-  MPM.add(createLoopIdiomPass());             // Recognize idioms like memset.
+  MPM.add(createIndVarSimplifyPass()); // Canonicalize indvars
+  MPM.add(createLoopIdiomPass());      // Recognize idioms like memset.
   addExtensionsToPM(EP_LateLoopOptimizations, MPM);
-  MPM.add(createLoopDeletionPass());          // Delete dead loops
+  MPM.add(createLoopDeletionPass()); // Delete dead loops
 
   if (EnableLoopInterchange)
     MPM.add(createLoopInterchangePass()); // Interchange loops
@@ -428,46 +511,92 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
                                      ForgetAllSCEVInLoopUnroll));
   addExtensionsToPM(EP_LoopOptimizerEnd, MPM);
   // This ends the loop pass pipelines.
+}
 
-  if (OptLevel > 1) {
-    MPM.add(createMergedLoadStoreMotionPass()); // Merge ld/st in diamonds
-    MPM.add(NewGVN ? createNewGVNPass()
-                   : createGVNPass(DisableGVNLoadPRE)); // Remove redundancies
-  }
-  MPM.add(createMemCpyOptPass());             // Remove memcpy / form memset
-  MPM.add(createSCCPPass());                  // Constant prop with SCCP
+void PassManagerBuilder::addCustomLoopModulePasses(
+    legacy::PassManagerBase &MPM) {
 
-  // Delete dead bit computations (instcombine runs after to fold away the dead
-  // computations, and then ADCE will run later to exploit any new DCE
-  // opportunities that creates).
-  MPM.add(createBitTrackingDCEPass());        // Delete dead bit computations
+  // Module loop pass pipeline start
 
-  // Run instcombine after redundancy elimination to exploit opportunities
-  // opened up by them.
+  // Re-rotate loops in all our loop nests. These may have fallout out of
+  // rotated form due to GVN or other transformations, and the vectorizer relies
+  // on the rotated form. Disable header duplication at -Oz.
+  MPM.add(createLoopRotatePass(SizeLevel == 2 ? 0 : -1));
+
+  // Distribute loops to allow partial vectorization.  I.e. isolate dependences
+  // into separate loop that would otherwise inhibit vectorization.  This is
+  // currently only performed for loops marked with the metadata
+  // llvm.loop.distribute=true or when -enable-loop-distribute is specified.
+  MPM.add(createLoopDistributePass());
+
+  MPM.add(createLoopVectorizePass(!LoopsInterleaved, !LoopVectorize));
+  MPM.add(createVectorCombinePass());
+  MPM.add(createEarlyCSEPass());
+
+  // Eliminate loads by forwarding stores from the previous iteration to loads
+  // of the current iteration.
+  MPM.add(createLoopLoadEliminationPass());
+
+  // FIXME: Because of #pragma vectorize enable, the passes below are always
+  // inserted in the pipeline, even when the vectorizer doesn't run (ex. when
+  // on -O1 and no #pragma is found). Would be good to have these two passes
+  // as function calls, so that we can only pass them when the vectorizer
+  // changed the code.
   addInstructionCombiningPass(MPM);
-  addExtensionsToPM(EP_Peephole, MPM);
-  if (OptLevel > 1) {
-    MPM.add(createJumpThreadingPass());         // Thread jumps
+  if (OptLevel > 1 && ExtraVectorizerPasses) {
+    // At higher optimization levels, try to clean up any runtime overlap and
+    // alignment checks inserted by the vectorizer. We want to track correllated
+    // runtime checks for two inner loops in the same outer loop, fold any
+    // common computations, hoist loop-invariant aspects out of any outer loop,
+    // and unswitch the runtime checks if possible. Once hoisted, we may have
+    // dead (or speculatable) control flows or more combining opportunities.
     MPM.add(createCorrelatedValuePropagationPass());
-    MPM.add(createDeadStoreEliminationPass());  // Delete dead stores
+    addInstructionCombiningPass(MPM);
+    MPM.add(createLICMPass(LicmMssaOptCap, LicmMssaNoAccForPromotionCap));
+    MPM.add(createLoopUnswitchPass(SizeLevel || OptLevel < 3, DivergentTarget));
+    MPM.add(createCFGSimplificationPass());
+    addInstructionCombiningPass(MPM);
+  }
+
+  // Cleanup after loop vectorization, etc. Simplification passes like CVP and
+  // GVN, loop transforms, and others have already run, so it's now better to
+  // convert to more optimized IR using more aggressive simplify CFG options.
+  // The extra sinking transform can create larger basic blocks, so do this
+  // before SLP vectorization.
+  MPM.add(createCFGSimplificationPass(1, true, true, false, true));
+
+  if (SLPVectorize) {
+    MPM.add(createSLPVectorizerPass()); // Vectorize parallel scalar chains.
+    if (OptLevel > 1 && ExtraVectorizerPasses) {
+      MPM.add(createEarlyCSEPass());
+    }
+  }
+
+  addExtensionsToPM(EP_Peephole, MPM);
+  addInstructionCombiningPass(MPM);
+
+  if (EnableUnrollAndJam && !DisableUnrollLoops) {
+    // Unroll and Jam. We do this before unroll but need to be in a separate
+    // loop pass manager in order for the outer loop to be processed by
+    // unroll and jam before the inner loop is unrolled.
+    MPM.add(createLoopUnrollAndJamPass(OptLevel));
+  }
+
+  // Unroll small loops
+  MPM.add(createLoopUnrollPass(OptLevel, DisableUnrollLoops,
+                               ForgetAllSCEVInLoopUnroll));
+
+  if (!DisableUnrollLoops) {
+    // LoopUnroll may generate some redundency to cleanup.
+    addInstructionCombiningPass(MPM);
+
+    // Runtime unrolling will introduce runtime check in loop prologue. If the
+    // unrolled loop is a inner loop, then the prologue will be inside the
+    // outer loop. LICM pass can help to promote the runtime check out if the
+    // checked value is loop invariant.
     MPM.add(createLICMPass(LicmMssaOptCap, LicmMssaNoAccForPromotionCap));
   }
-
-  addExtensionsToPM(EP_ScalarOptimizerLate, MPM);
-
-  if (RerollLoops)
-    MPM.add(createLoopRerollPass());
-
-  // TODO: Investigate if this is too expensive at O1.
-  MPM.add(createAggressiveDCEPass());         // Delete dead instructions
-  MPM.add(createCFGSimplificationPass()); // Merge & remove BBs
-  // Clean up after everything.
-  addInstructionCombiningPass(MPM);
-  addExtensionsToPM(EP_Peephole, MPM);
-
-  if (EnableCHR && OptLevel >= 3 &&
-      (!PGOInstrUse.empty() || !PGOSampleUse.empty() || EnablePGOCSInstrGen))
-    MPM.add(createControlHeightReductionLegacyPass());
+  // Module loop pass pipeline end
 }
 
 void PassManagerBuilder::populateModulePassManager(
@@ -564,7 +693,7 @@ void PassManagerBuilder::populateModulePassManager(
   if (OptLevel > 2)
     MPM.add(createCallSiteSplittingPass());
 
-  MPM.add(createIPSCCPPass());          // IP SCCP
+  MPM.add(createIPSCCPPass()); // IP SCCP
   MPM.add(createCalledValuePropagationPass());
 
   MPM.add(createGlobalOptimizerPass()); // Optimize out global vars
@@ -617,9 +746,16 @@ void PassManagerBuilder::populateModulePassManager(
     MPM.add(createArgumentPromotionPass()); // Scalarize uninlined fn args
 
   addExtensionsToPM(EP_CGSCCOptimizerLate, MPM);
+
   // Check if custom loop transformation ordering is enabled (-Ocustom).
+  // Enable extra and experimental transformations.
   if (OptLevel == 9) {
     EnableLoopInterchange = true;
+    EnableUnrollAndJam = true;
+    EnableSimpleLoopUnswitch = true;
+    ExtraVectorizerPasses = true;
+    SLPVectorize = true;
+    UseLoopVersioningLICM = true;
   }
   addFunctionSimplificationPasses(MPM);
 
@@ -691,7 +827,7 @@ void PassManagerBuilder::populateModulePassManager(
   // size. By placing it just after inlining other optimizations which runs
   // later might get benefit of no-alias assumption in clone loop.
   if (UseLoopVersioningLICM) {
-    MPM.add(createLoopVersioningLICMPass());    // Do LoopVersioningLICM
+    MPM.add(createLoopVersioningLICMPass()); // Do LoopVersioningLICM
     MPM.add(createLICMPass(LicmMssaOptCap, LicmMssaNoAccForPromotionCap));
   }
 
@@ -725,83 +861,94 @@ void PassManagerBuilder::populateModulePassManager(
 
   addExtensionsToPM(EP_VectorizerStart, MPM);
 
-  // Re-rotate loops in all our loop nests. These may have fallout out of
-  // rotated form due to GVN or other transformations, and the vectorizer relies
-  // on the rotated form. Disable header duplication at -Oz.
-  MPM.add(createLoopRotatePass(SizeLevel == 2 ? 0 : -1));
+  // Check if custom loop transformation ordering is enabled (-Ocustom).
+  if (OptLevel == 9) {
+    addCustomLoopModulePasses(MPM);
+  } else {
+    // Module loop pass pipeline start
 
-  // Distribute loops to allow partial vectorization.  I.e. isolate dependences
-  // into separate loop that would otherwise inhibit vectorization.  This is
-  // currently only performed for loops marked with the metadata
-  // llvm.loop.distribute=true or when -enable-loop-distribute is specified.
-  MPM.add(createLoopDistributePass());
+    // Re-rotate loops in all our loop nests. These may have fallout out of
+    // rotated form due to GVN or other transformations, and the vectorizer
+    // relies on the rotated form. Disable header duplication at -Oz.
+    MPM.add(createLoopRotatePass(SizeLevel == 2 ? 0 : -1));
 
-  MPM.add(createLoopVectorizePass(!LoopsInterleaved, !LoopVectorize));
-  MPM.add(createVectorCombinePass());
-  MPM.add(createEarlyCSEPass());
+    // Distribute loops to allow partial vectorization.  I.e. isolate
+    // dependences into separate loop that would otherwise inhibit
+    // vectorization.  This is currently only performed for loops marked with
+    // the metadata llvm.loop.distribute=true or when -enable-loop-distribute is
+    // specified.
+    MPM.add(createLoopDistributePass());
 
-  // Eliminate loads by forwarding stores from the previous iteration to loads
-  // of the current iteration.
-  MPM.add(createLoopLoadEliminationPass());
+    MPM.add(createLoopVectorizePass(!LoopsInterleaved, !LoopVectorize));
+    MPM.add(createVectorCombinePass());
+    MPM.add(createEarlyCSEPass());
 
-  // FIXME: Because of #pragma vectorize enable, the passes below are always
-  // inserted in the pipeline, even when the vectorizer doesn't run (ex. when
-  // on -O1 and no #pragma is found). Would be good to have these two passes
-  // as function calls, so that we can only pass them when the vectorizer
-  // changed the code.
-  addInstructionCombiningPass(MPM);
-  if (OptLevel > 1 && ExtraVectorizerPasses) {
-    // At higher optimization levels, try to clean up any runtime overlap and
-    // alignment checks inserted by the vectorizer. We want to track correllated
-    // runtime checks for two inner loops in the same outer loop, fold any
-    // common computations, hoist loop-invariant aspects out of any outer loop,
-    // and unswitch the runtime checks if possible. Once hoisted, we may have
-    // dead (or speculatable) control flows or more combining opportunities.
-    MPM.add(createCorrelatedValuePropagationPass());
+    // Eliminate loads by forwarding stores from the previous iteration to loads
+    // of the current iteration.
+    MPM.add(createLoopLoadEliminationPass());
+
+    // FIXME: Because of #pragma vectorize enable, the passes below are always
+    // inserted in the pipeline, even when the vectorizer doesn't run (ex. when
+    // on -O1 and no #pragma is found). Would be good to have these two passes
+    // as function calls, so that we can only pass them when the vectorizer
+    // changed the code.
     addInstructionCombiningPass(MPM);
-    MPM.add(createLICMPass(LicmMssaOptCap, LicmMssaNoAccForPromotionCap));
-    MPM.add(createLoopUnswitchPass(SizeLevel || OptLevel < 3, DivergentTarget));
-    MPM.add(createCFGSimplificationPass());
-    addInstructionCombiningPass(MPM);
-  }
-
-  // Cleanup after loop vectorization, etc. Simplification passes like CVP and
-  // GVN, loop transforms, and others have already run, so it's now better to
-  // convert to more optimized IR using more aggressive simplify CFG options.
-  // The extra sinking transform can create larger basic blocks, so do this
-  // before SLP vectorization.
-  MPM.add(createCFGSimplificationPass(1, true, true, false, true));
-
-  if (SLPVectorize) {
-    MPM.add(createSLPVectorizerPass()); // Vectorize parallel scalar chains.
     if (OptLevel > 1 && ExtraVectorizerPasses) {
-      MPM.add(createEarlyCSEPass());
+      // At higher optimization levels, try to clean up any runtime overlap and
+      // alignment checks inserted by the vectorizer. We want to track
+      // correllated runtime checks for two inner loops in the same outer loop,
+      // fold any common computations, hoist loop-invariant aspects out of any
+      // outer loop, and unswitch the runtime checks if possible. Once hoisted,
+      // we may have dead (or speculatable) control flows or more combining
+      // opportunities.
+      MPM.add(createCorrelatedValuePropagationPass());
+      addInstructionCombiningPass(MPM);
+      MPM.add(createLICMPass(LicmMssaOptCap, LicmMssaNoAccForPromotionCap));
+      MPM.add(
+          createLoopUnswitchPass(SizeLevel || OptLevel < 3, DivergentTarget));
+      MPM.add(createCFGSimplificationPass());
+      addInstructionCombiningPass(MPM);
     }
-  }
 
-  addExtensionsToPM(EP_Peephole, MPM);
-  addInstructionCombiningPass(MPM);
+    // Cleanup after loop vectorization, etc. Simplification passes like CVP and
+    // GVN, loop transforms, and others have already run, so it's now better to
+    // convert to more optimized IR using more aggressive simplify CFG options.
+    // The extra sinking transform can create larger basic blocks, so do this
+    // before SLP vectorization.
+    MPM.add(createCFGSimplificationPass(1, true, true, false, true));
 
-  if (EnableUnrollAndJam && !DisableUnrollLoops) {
-    // Unroll and Jam. We do this before unroll but need to be in a separate
-    // loop pass manager in order for the outer loop to be processed by
-    // unroll and jam before the inner loop is unrolled.
-    MPM.add(createLoopUnrollAndJamPass(OptLevel));
-  }
+    if (SLPVectorize) {
+      MPM.add(createSLPVectorizerPass()); // Vectorize parallel scalar chains.
+      if (OptLevel > 1 && ExtraVectorizerPasses) {
+        MPM.add(createEarlyCSEPass());
+      }
+    }
 
-  // Unroll small loops
-  MPM.add(createLoopUnrollPass(OptLevel, DisableUnrollLoops,
-                               ForgetAllSCEVInLoopUnroll));
-
-  if (!DisableUnrollLoops) {
-    // LoopUnroll may generate some redundency to cleanup.
+    addExtensionsToPM(EP_Peephole, MPM);
     addInstructionCombiningPass(MPM);
 
-    // Runtime unrolling will introduce runtime check in loop prologue. If the
-    // unrolled loop is a inner loop, then the prologue will be inside the
-    // outer loop. LICM pass can help to promote the runtime check out if the
-    // checked value is loop invariant.
-    MPM.add(createLICMPass(LicmMssaOptCap, LicmMssaNoAccForPromotionCap));
+    if (EnableUnrollAndJam && !DisableUnrollLoops) {
+      // Unroll and Jam. We do this before unroll but need to be in a separate
+      // loop pass manager in order for the outer loop to be processed by
+      // unroll and jam before the inner loop is unrolled.
+      MPM.add(createLoopUnrollAndJamPass(OptLevel));
+    }
+
+    // Unroll small loops
+    MPM.add(createLoopUnrollPass(OptLevel, DisableUnrollLoops,
+                                 ForgetAllSCEVInLoopUnroll));
+
+    if (!DisableUnrollLoops) {
+      // LoopUnroll may generate some redundency to cleanup.
+      addInstructionCombiningPass(MPM);
+
+      // Runtime unrolling will introduce runtime check in loop prologue. If the
+      // unrolled loop is a inner loop, then the prologue will be inside the
+      // outer loop. LICM pass can help to promote the runtime check out if the
+      // checked value is loop invariant.
+      MPM.add(createLICMPass(LicmMssaOptCap, LicmMssaNoAccForPromotionCap));
+    }
+    // Module loop pass pipeline end
   }
 
   MPM.add(createWarnMissedTransformationsPass());
@@ -816,8 +963,8 @@ void PassManagerBuilder::populateModulePassManager(
   // GlobalOpt already deletes dead functions and globals, at -O2 try a
   // late pass of GlobalDCE.  It is capable of deleting dead cycles.
   if (OptLevel > 1) {
-    MPM.add(createGlobalDCEPass());         // Remove dead fns and globals.
-    MPM.add(createConstantMergePass());     // Merge dup global constants
+    MPM.add(createGlobalDCEPass());     // Remove dead fns and globals.
+    MPM.add(createConstantMergePass()); // Merge dup global constants
   }
 
   // See comment in the new PM for justification of scheduling splitting at
@@ -943,7 +1090,7 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
     Inliner = nullptr;
   }
 
-  PM.add(createPruneEHPass());   // Remove dead EH info.
+  PM.add(createPruneEHPass()); // Remove dead EH info.
 
   // CSFDO instrumentation and use pass.
   addPGOInstrPasses(PM, /* IsCS */ true);
@@ -987,7 +1134,7 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
   PM.add(createMergedLoadStoreMotionPass()); // Merge ld/st in diamonds.
   PM.add(NewGVN ? createNewGVNPass()
                 : createGVNPass(DisableGVNLoadPRE)); // Remove redundancies.
-  PM.add(createMemCpyOptPass());            // Remove dead memcpys.
+  PM.add(createMemCpyOptPass());                     // Remove dead memcpys.
 
   // Nuke dead stores.
   PM.add(createDeadStoreEliminationPass());
@@ -1012,10 +1159,10 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
   // we may have exposed more scalar opportunities. Run parts of the scalar
   // optimizer again at this point.
   PM.add(createVectorCombinePass());
-  addInstructionCombiningPass(PM); // Initial cleanup
+  addInstructionCombiningPass(PM);       // Initial cleanup
   PM.add(createCFGSimplificationPass()); // if-convert
-  PM.add(createSCCPPass()); // Propagate exposed constants
-  addInstructionCombiningPass(PM); // Clean up again
+  PM.add(createSCCPPass());              // Propagate exposed constants
+  addInstructionCombiningPass(PM);       // Clean up again
   PM.add(createBitTrackingDCEPass());
 
   // More scalar chains could be vectorized due to more alias information
@@ -1136,57 +1283,49 @@ void LLVMPassManagerBuilderDispose(LLVMPassManagerBuilderRef PMB) {
   delete Builder;
 }
 
-void
-LLVMPassManagerBuilderSetOptLevel(LLVMPassManagerBuilderRef PMB,
-                                  unsigned OptLevel) {
+void LLVMPassManagerBuilderSetOptLevel(LLVMPassManagerBuilderRef PMB,
+                                       unsigned OptLevel) {
   PassManagerBuilder *Builder = unwrap(PMB);
   Builder->OptLevel = OptLevel;
 }
 
-void
-LLVMPassManagerBuilderSetSizeLevel(LLVMPassManagerBuilderRef PMB,
-                                   unsigned SizeLevel) {
+void LLVMPassManagerBuilderSetSizeLevel(LLVMPassManagerBuilderRef PMB,
+                                        unsigned SizeLevel) {
   PassManagerBuilder *Builder = unwrap(PMB);
   Builder->SizeLevel = SizeLevel;
 }
 
-void
-LLVMPassManagerBuilderSetDisableUnitAtATime(LLVMPassManagerBuilderRef PMB,
-                                            LLVMBool Value) {
+void LLVMPassManagerBuilderSetDisableUnitAtATime(LLVMPassManagerBuilderRef PMB,
+                                                 LLVMBool Value) {
   // NOTE: The DisableUnitAtATime switch has been removed.
 }
 
-void
-LLVMPassManagerBuilderSetDisableUnrollLoops(LLVMPassManagerBuilderRef PMB,
-                                            LLVMBool Value) {
+void LLVMPassManagerBuilderSetDisableUnrollLoops(LLVMPassManagerBuilderRef PMB,
+                                                 LLVMBool Value) {
   PassManagerBuilder *Builder = unwrap(PMB);
   Builder->DisableUnrollLoops = Value;
 }
 
-void
-LLVMPassManagerBuilderSetDisableSimplifyLibCalls(LLVMPassManagerBuilderRef PMB,
-                                                 LLVMBool Value) {
+void LLVMPassManagerBuilderSetDisableSimplifyLibCalls(
+    LLVMPassManagerBuilderRef PMB, LLVMBool Value) {
   // NOTE: The simplify-libcalls pass has been removed.
 }
 
-void
-LLVMPassManagerBuilderUseInlinerWithThreshold(LLVMPassManagerBuilderRef PMB,
-                                              unsigned Threshold) {
+void LLVMPassManagerBuilderUseInlinerWithThreshold(
+    LLVMPassManagerBuilderRef PMB, unsigned Threshold) {
   PassManagerBuilder *Builder = unwrap(PMB);
   Builder->Inliner = createFunctionInliningPass(Threshold);
 }
 
-void
-LLVMPassManagerBuilderPopulateFunctionPassManager(LLVMPassManagerBuilderRef PMB,
-                                                  LLVMPassManagerRef PM) {
+void LLVMPassManagerBuilderPopulateFunctionPassManager(
+    LLVMPassManagerBuilderRef PMB, LLVMPassManagerRef PM) {
   PassManagerBuilder *Builder = unwrap(PMB);
   legacy::FunctionPassManager *FPM = unwrap<legacy::FunctionPassManager>(PM);
   Builder->populateFunctionPassManager(*FPM);
 }
 
-void
-LLVMPassManagerBuilderPopulateModulePassManager(LLVMPassManagerBuilderRef PMB,
-                                                LLVMPassManagerRef PM) {
+void LLVMPassManagerBuilderPopulateModulePassManager(
+    LLVMPassManagerBuilderRef PMB, LLVMPassManagerRef PM) {
   PassManagerBuilder *Builder = unwrap(PMB);
   legacy::PassManagerBase *MPM = unwrap(PM);
   Builder->populateModulePassManager(*MPM);

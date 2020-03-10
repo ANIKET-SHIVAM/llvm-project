@@ -151,6 +151,30 @@ static cl::opt<bool>
     EnableMatrix("enable-matrix", cl::init(false), cl::Hidden,
                  cl::desc("Enable lowering of the matrix intrinsics"));
 
+static ManagedStatic<std::vector<std::string>> LoopOptzOrderType;
+
+namespace {
+
+struct LoopOptzOrderOpt {
+  void operator=(const std::string &Val) const {
+    if (Val.empty())
+      return;
+    SmallVector<StringRef,8> optzTypes;
+    StringRef(Val).split(optzTypes, ',', -1, false);
+    for (auto optzType : optzTypes)
+      LoopOptzOrderType->push_back(std::string(optzType));
+  }
+};
+
+}
+
+static LoopOptzOrderOpt LoopOptzOrderOptLoc;
+
+static cl::opt<LoopOptzOrderOpt, true, cl::parser<std::string> >
+LoopOptzOrder("loop-optz-order", cl::desc("Execute loop optimizations in specific order (comma separated list of optimizations)"),
+          cl::Hidden, cl::ZeroOrMore, cl::value_desc("order string"),
+          cl::location(LoopOptzOrderOptLoc), cl::ValueRequired);
+
 PassManagerBuilder::PassManagerBuilder() {
   OptLevel = 2;
   SizeLevel = 0;
@@ -756,6 +780,14 @@ void PassManagerBuilder::populateModulePassManager(
     ExtraVectorizerPasses = true;
     SLPVectorize = true;
     UseLoopVersioningLICM = true;
+    if (LoopOptzOrderType->empty()) {
+      DEBUG_WITH_TYPE("loop-optz-order", dbgs() << "No custom loop optimization order provided. Going with default sequence.\n");
+    } else {
+      DEBUG_WITH_TYPE("loop-optz-order", dbgs() << "Custom loop optimization order:\n");
+      for (auto &optz : *LoopOptzOrderType) {
+        DEBUG_WITH_TYPE("loop-optz-order", dbgs() << "---" << optz << '\n');
+      }
+    }
   }
   addFunctionSimplificationPasses(MPM);
 

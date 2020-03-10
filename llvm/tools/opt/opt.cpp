@@ -829,8 +829,6 @@ int main(int argc, char **argv) {
 
   for (unsigned i = 0; i < PassList.size(); ++i) {
     const PassInfo *PassInf = PassList[i];
-    if ((PassInf->getPassArgument().compare("loop-custom-optz")) != 0)
-      continue;
     Pass *P = nullptr;
     if (PassInf->getNormalCtor())
       P = PassInf->getNormalCtor()();

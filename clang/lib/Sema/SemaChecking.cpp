@@ -1843,6 +1843,8 @@ Sema::CheckBuiltinFunctionCall(FunctionDecl *FDecl, unsigned BuiltinID,
       return ExprError();
     break;
   case Builtin::BI__builtin_os_log_format:
+    Cleanup.setExprNeedsCleanups(true);
+    LLVM_FALLTHROUGH;
   case Builtin::BI__builtin_os_log_format_buffer_size:
     if (SemaBuiltinOSLogFormat(TheCall))
       return ExprError();
@@ -1851,6 +1853,17 @@ Sema::CheckBuiltinFunctionCall(FunctionDecl *FDecl, unsigned BuiltinID,
   case Builtin::BI__builtin_return_address:
     if (SemaBuiltinConstantArgRange(TheCall, 0, 0, 0xFFFF))
       return ExprError();
+
+    // -Wframe-address warning if non-zero passed to builtin
+    // return/frame address.
+    Expr::EvalResult Result;
+    if (TheCall->getArg(0)->EvaluateAsInt(Result, getASTContext()) &&
+        Result.Val.getInt() != 0)
+      Diag(TheCall->getBeginLoc(), diag::warn_frame_address)
+          << ((BuiltinID == Builtin::BI__builtin_return_address)
+                  ? "__builtin_return_address"
+                  : "__builtin_frame_address")
+          << TheCall->getSourceRange();
     break;
   }
 

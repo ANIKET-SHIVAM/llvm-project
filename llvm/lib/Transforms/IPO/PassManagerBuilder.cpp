@@ -161,7 +161,6 @@ PassManagerBuilder::PassManagerBuilder() {
     DisableUnrollLoops = false;
     SLPVectorize = RunSLPVectorization;
     LoopVectorize = EnableLoopVectorization;
-    LoopCustomOptz = false;
     LoopsInterleaved = EnableLoopInterleaving;
     RerollLoops = RunLoopRerolling;
     NewGVN = RunNewGVN;
@@ -390,6 +389,10 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   MPM.add(createCFGSimplificationPass());      // Merge & remove BBs
   MPM.add(createReassociatePass());           // Reassociate expressions
 
+  // Check if custom loop transformation ordering is enabled (-Ocustom).
+  if (OptLevel == 9) {
+    //MPM.add(createLoopCustomOptzPass());
+  }
   // Begin the loop pass pipeline.
   if (EnableSimpleLoopUnswitch) {
     // The simple loop unswitch pass relies on separate cleanup passes. Schedule
@@ -614,6 +617,10 @@ void PassManagerBuilder::populateModulePassManager(
     MPM.add(createArgumentPromotionPass()); // Scalarize uninlined fn args
 
   addExtensionsToPM(EP_CGSCCOptimizerLate, MPM);
+  // Check if custom loop transformation ordering is enabled (-Ocustom).
+  if (OptLevel == 9) {
+    EnableLoopInterchange = true;
+  }
   addFunctionSimplificationPasses(MPM);
 
   // FIXME: This is a HACK! The inliner pass above implicitly creates a CGSCC
@@ -770,10 +777,6 @@ void PassManagerBuilder::populateModulePassManager(
     if (OptLevel > 1 && ExtraVectorizerPasses) {
       MPM.add(createEarlyCSEPass());
     }
-  }
-  // Check if custom loop transformation ordering is enabled.
-  if (LoopCustomOptz) {
-    MPM.add(createLoopCustomOptzPass());
   }
 
   addExtensionsToPM(EP_Peephole, MPM);

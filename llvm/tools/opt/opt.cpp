@@ -166,6 +166,10 @@ static cl::opt<bool>
 OptLevelO3("O3",
            cl::desc("Optimization level 3. Similar to clang -O3"));
 
+static cl::opt<bool>
+OptLevelOcustom("Ocustom",
+           cl::desc("Custom ordering of Loop Optimizations"));
+
 static cl::opt<unsigned>
 CodeGenOptLevel("codegen-opt-level",
                 cl::desc("Override optimization level for codegen hooks"));
@@ -463,6 +467,8 @@ static CodeGenOpt::Level GetCodeGenOptLevel() {
     return CodeGenOpt::Default;
   if (OptLevelO3)
     return CodeGenOpt::Aggressive;
+  if (OptLevelOcustom)
+    return CodeGenOpt::Aggressive;
   return CodeGenOpt::None;
 }
 
@@ -756,7 +762,7 @@ int main(int argc, char **argv) {
 
   std::unique_ptr<legacy::FunctionPassManager> FPasses;
   if (OptLevelO0 || OptLevelO1 || OptLevelO2 || OptLevelOs || OptLevelOz ||
-      OptLevelO3) {
+      OptLevelO3 || OptLevelOcustom) {
     FPasses.reset(new legacy::FunctionPassManager(M.get()));
     FPasses->add(createTargetTransformInfoWrapperPass(
         TM ? TM->getTargetIRAnalysis() : TargetIRAnalysis()));
@@ -787,26 +793,21 @@ int main(int argc, char **argv) {
     Passes.add(TPC);
   }
 
-  // Change order of loop transformations
-  /*if (LoopCustomOptz)
-    addPass(Passes,createLoopCustomOptzPass());
-  else */{
-    for (unsigned i = 0; i < PassList.size(); ++i) {
-      const PassInfo *PassInf = PassList[i];
-      if ((PassInf->getPassArgument().compare("loop-custom-optz")) != 0)
-        continue;
-      Pass *P = nullptr;
-      if (PassInf->getNormalCtor())
-        P = PassInf->getNormalCtor()();
-      else
-        errs() << argv[0] << ": cannot create pass: "
-               << PassInf->getPassName() << "\n";
-      if (P) {
-        addPass(Passes, P);
-      }
-      PassList.erase(PassList.begin() + i);
-      break;
+  for (unsigned i = 0; i < PassList.size(); ++i) {
+    const PassInfo *PassInf = PassList[i];
+    if ((PassInf->getPassArgument().compare("loop-custom-optz")) != 0)
+      continue;
+    Pass *P = nullptr;
+    if (PassInf->getNormalCtor())
+      P = PassInf->getNormalCtor()();
+    else
+      errs() << argv[0] << ": cannot create pass: "
+             << PassInf->getPassName() << "\n";
+    if (P) {
+      addPass(Passes, P);
     }
+    PassList.erase(PassList.begin() + i);
+    break;
   }
 
   // Create a new optimization pass for each one specified on the command line
@@ -847,6 +848,11 @@ int main(int argc, char **argv) {
       OptLevelO3 = false;
     }
 
+    if (OptLevelOcustom && OptLevelOcustom.getPosition() < PassList.getPosition(i)) {
+      AddOptimizationPasses(Passes, *FPasses, TM.get(), 9, 0);
+      OptLevelOcustom = false;
+    }
+
     const PassInfo *PassInf = PassList[i];
     Pass *P = nullptr;
     if (PassInf->getNormalCtor())
@@ -868,7 +874,7 @@ int main(int argc, char **argv) {
           break;
         case PT_Function:
           Passes.add(createFunctionPassPrinter(PassInf, Out->os(), Quiet));
-          break;
+        break;
         case PT_CallGraphSCC:
           Passes.add(createCallGraphPassPrinter(PassInf, Out->os(), Quiet));
           break;
@@ -906,6 +912,9 @@ int main(int argc, char **argv) {
 
   if (OptLevelO3)
     AddOptimizationPasses(Passes, *FPasses, TM.get(), 3, 0);
+
+  if (OptLevelOcustom)
+    AddOptimizationPasses(Passes, *FPasses, TM.get(), 9, 0);
 
   if (FPasses) {
     FPasses->doInitialization();

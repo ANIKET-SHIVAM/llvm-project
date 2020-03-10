@@ -128,7 +128,7 @@ public:
   };
 
   /// The Optimization Level - Specify the basic optimization level.
-  ///    0 = -O0, 1 = -O1, 2 = -O2, 3 = -O3
+  ///    0 = -O0, 1 = -O1, 2 = -O2, 3 = -O3, 9 = -Ocustom
   unsigned OptLevel;
 
   /// SizeLevel - How much we're optimizing for size.
@@ -158,7 +158,6 @@ public:
   bool DisableUnrollLoops;
   bool SLPVectorize;
   bool LoopVectorize;
-  bool LoopCustomOptz;
   bool LoopsInterleaved;
   bool RerollLoops;
   bool NewGVN;

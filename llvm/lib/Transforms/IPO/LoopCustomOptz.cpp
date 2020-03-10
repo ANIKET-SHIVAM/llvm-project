@@ -89,9 +89,6 @@ bool LoopCustomOptz::runOnFunction(Function &F) {
   if (F.empty())
     return false;
 
-  if (F.isDeclaration())
-    return false;
-
   LoopInfo &LI = getAnalysis<LoopInfoWrapperPass>(F).getLoopInfo();
 
   // If there are no loops in the function.

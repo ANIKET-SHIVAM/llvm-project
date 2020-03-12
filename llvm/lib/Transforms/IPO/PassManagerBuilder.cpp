@@ -153,27 +153,58 @@ static cl::opt<bool>
 
 static ManagedStatic<std::vector<std::string>> LoopOptzOrderType;
 
+enum LoopOptz {
+  loadstorevectorize, // Vectorize load and store instructions
+  dataprefetch,       // Loop Data Prefetch
+  deletion,           // Delete dead loops
+  distribute,         // Loop Distribution
+  fusion,             // Loop Fusion
+  interchange,        // Interchanges loops for cache reuse
+  loadelim,           // Loop Load Elimination
+  predication,        // Loop predication
+  reduce,             // Loop Strength Reduction
+  reroll,             // Reroll loops
+  rotate,             // Rotate Loops
+  sink,               // Loop Sink
+  slpvectorize,       // SLP Vectorizer
+  unroll,             // Unroll loops
+  unrolljam,          // Unroll and Jam loops
+  unswitch,           // Unswitch loops
+  vectorize,          // Loop Vectorization
+  versioning,         // Loop Versioning
+  versioninglicm,     // Loop Versioning For LICM
+};
+
+static std::map<std::string, enum LoopOptz> LoopOptzOrderMap = {
+    {"distribute", distribute},      {"fusion", fusion},
+    {"interchange", interchange},    {"reroll", reroll},
+    {"slp-vectorize", slpvectorize}, {"unroll", unroll},
+    {"unroll-jam", unrolljam},       {"vectorize", vectorize},
+};
+
 namespace {
 
 struct LoopOptzOrderOpt {
   void operator=(const std::string &Val) const {
     if (Val.empty())
       return;
-    SmallVector<StringRef,8> optzTypes;
+    SmallVector<StringRef, 8> optzTypes;
     StringRef(Val).split(optzTypes, ',', -1, false);
     for (auto optzType : optzTypes)
       LoopOptzOrderType->push_back(std::string(optzType));
   }
 };
 
-}
+} // namespace
 
 static LoopOptzOrderOpt LoopOptzOrderOptLoc;
 
-static cl::opt<LoopOptzOrderOpt, true, cl::parser<std::string> >
-LoopOptzOrder("loop-optz-order", cl::desc("Execute loop optimizations in specific order (comma separated list of optimizations)"),
-          cl::Hidden, cl::ZeroOrMore, cl::value_desc("order string"),
-          cl::location(LoopOptzOrderOptLoc), cl::ValueRequired);
+static cl::opt<LoopOptzOrderOpt, true, cl::parser<std::string>>
+    LoopOptzOrder("loop-optz-order",
+                  cl::desc("Execute loop optimizations in specific order "
+                           "(comma separated list of optimizations)"),
+                  cl::Hidden, cl::ZeroOrMore, cl::value_desc("order string"),
+                  cl::location(LoopOptzOrderOptLoc), cl::ValueRequired);
 
 PassManagerBuilder::PassManagerBuilder() {
   OptLevel = 2;
@@ -527,8 +558,9 @@ void PassManagerBuilder::addCustomLoopFunctionSimplificationPasses(
   addExtensionsToPM(EP_LateLoopOptimizations, MPM);
   MPM.add(createLoopDeletionPass()); // Delete dead loops
 
-  if (EnableLoopInterchange)
-    MPM.add(createLoopInterchangePass()); // Interchange loops
+  // Moving Loop Interchange to Module Pass
+  // if (EnableLoopInterchange)
+  //  MPM.add(createLoopInterchangePass()); // Interchange loops
 
   // Unroll small loops
   MPM.add(createSimpleLoopUnrollPass(OptLevel, DisableUnrollLoops,
@@ -540,7 +572,76 @@ void PassManagerBuilder::addCustomLoopFunctionSimplificationPasses(
 void PassManagerBuilder::addCustomLoopModulePasses(
     legacy::PassManagerBase &MPM) {
 
-  // Module loop pass pipeline start
+  if (!LoopOptzOrderType->empty()) {
+    // Preparation:
+    // Re-rotate loops in all our loop nests. These may have fallout out of
+    // rotated form due to GVN or other transformations, and the vectorizer
+    // relies on the rotated form. Disable header duplication at -Oz.
+    MPM.add(createLoopRotatePass(SizeLevel == 2 ? 0 : -1));
+
+    for (auto &optz : *LoopOptzOrderType) {
+      switch (LoopOptzOrderMap[optz]) {
+      case distribute:
+        MPM.add(createLoopDistributePass());
+        break;
+      case fusion:
+        MPM.add(createLoopFusePass());
+        break;
+      case interchange:
+        MPM.add(createLoopInterchangePass()); // Interchange loops
+        break;
+      case reroll:
+        MPM.add(createLoopRerollPass());
+        break;
+      case slpvectorize:
+        MPM.add(createCFGSimplificationPass(1, true, true, false, true));
+        MPM.add(createSLPVectorizerPass()); // Vectorize parallel scalar chains.
+        MPM.add(createEarlyCSEPass());
+        break;
+      case unroll:
+        MPM.add(createLoopUnrollPass(OptLevel, DisableUnrollLoops,
+                                     ForgetAllSCEVInLoopUnroll));
+        break;
+      case unrolljam:
+        MPM.add(createLoopUnrollAndJamPass(OptLevel));
+        break;
+      case vectorize:
+        MPM.add(createLoopVectorizePass(!LoopsInterleaved, !LoopVectorize));
+        MPM.add(createVectorCombinePass());
+        MPM.add(createEarlyCSEPass());
+        break;
+      default:
+        DEBUG_WITH_TYPE("loop-optz-order",
+                        dbgs() << "Cannot find optimization: " << optz << '\n');
+      }
+    }
+
+    // Post Cleanup:
+    // LoopUnroll may generate some redundency to cleanup.
+    addInstructionCombiningPass(MPM);
+    // At higher optimization levels, try to clean up any runtime overlap and
+    // alignment checks inserted by the vectorizer. We want to track correllated
+    // runtime checks for two inner loops in the same outer loop, fold any
+    // common computations, hoist loop-invariant aspects out of any outer loop,
+    // and unswitch the runtime checks if possible. Once hoisted, we may have
+    // dead (or speculatable) control flows or more combining opportunities.
+    MPM.add(createCorrelatedValuePropagationPass());
+    addInstructionCombiningPass(MPM);
+    MPM.add(createLICMPass(LicmMssaOptCap, LicmMssaNoAccForPromotionCap));
+    MPM.add(createLoopUnswitchPass(SizeLevel || OptLevel < 3, DivergentTarget));
+    MPM.add(createCFGSimplificationPass());
+
+    // Runtime unrolling will introduce runtime check in loop prologue. If the
+    // unrolled loop is a inner loop, then the prologue will be inside the
+    // outer loop. LICM pass can help to promote the runtime check out if the
+    // checked value is loop invariant.
+    MPM.add(createLICMPass(LicmMssaOptCap, LicmMssaNoAccForPromotionCap));
+    return;
+  }
+
+  // Deafult Pipeline: Module loop pass pipeline start
+  if (EnableLoopInterchange)
+    MPM.add(createLoopInterchangePass()); // Interchange loops
 
   // Re-rotate loops in all our loop nests. These may have fallout out of
   // rotated form due to GVN or other transformations, and the vectorizer relies
@@ -781,9 +882,12 @@ void PassManagerBuilder::populateModulePassManager(
     SLPVectorize = true;
     UseLoopVersioningLICM = true;
     if (LoopOptzOrderType->empty()) {
-      DEBUG_WITH_TYPE("loop-optz-order", dbgs() << "No custom loop optimization order provided. Going with default sequence.\n");
+      DEBUG_WITH_TYPE("loop-optz-order",
+                      dbgs() << "No custom loop optimization order provided. "
+                                "Going with default sequence.\n");
     } else {
-      DEBUG_WITH_TYPE("loop-optz-order", dbgs() << "Custom loop optimization order:\n");
+      DEBUG_WITH_TYPE("loop-optz-order",
+                      dbgs() << "Custom loop optimization order:\n");
       for (auto &optz : *LoopOptzOrderType) {
         DEBUG_WITH_TYPE("loop-optz-order", dbgs() << "---" << optz << '\n');
       }
